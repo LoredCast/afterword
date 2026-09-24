@@ -1,0 +1,128 @@
+/*
+ * Afterword starter styles (optional).
+ *
+ * The widget works without this file: it adds ordinary elements that your
+ * blog's own CSS already styles. This file only adds spacing and a few quiet
+ * details. It inherits your fonts and colours and uses currentColor, so it
+ * suits light and dark themes. Copy it into your blog's custom CSS and edit
+ * freely; every class is documented in docs/styling.md.
+ */
+
+.afterword {
+  margin-top: 3em;
+}
+
+.afterword-heading {
+  margin-bottom: 1em;
+}
+
+.afterword-count {
+  opacity: 0.6;
+  font-weight: normal;
+}
+
+.afterword-list {
+  list-style: none;
+  margin: 0 0 2em;
+  padding: 0;
+}
+
+.afterword-comment {
+  margin: 0;
+  padding: 1em 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+
+.afterword-comment:target {
+  outline: 2px solid color-mix(in srgb, currentColor 35%, transparent);
+  outline-offset: 0.5em;
+}
+
+.afterword-meta {
+  margin: 0 0 0.4em;
+  font-size: 0.9em;
+}
+
+.afterword-author {
+  font-weight: bold;
+}
+
+.afterword-permalink,
+.afterword-permalink:visited {
+  color: inherit;
+  opacity: 0.7;
+  text-decoration: none;
+}
+
+.afterword-permalink:hover,
+.afterword-permalink:focus-visible {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.afterword-body p {
+  margin: 0 0 0.75em;
+  overflow-wrap: anywhere;
+}
+
+.afterword-body p:last-child {
+  margin-bottom: 0;
+}
+
+.afterword-empty,
+.afterword-closed,
+.afterword-status {
+  opacity: 0.7;
+}
+
+.afterword-form {
+  margin-top: 1em;
+}
+
+.afterword-field {
+  margin: 0 0 1em;
+}
+
+.afterword-label {
+  display: block;
+  margin-bottom: 0.3em;
+  font-size: 0.9em;
+}
+
+.afterword-input,
+.afterword-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 36em;
+  font: inherit;
+}
+
+.afterword-textarea {
+  min-height: 8em;
+  resize: vertical;
+}
+
+.afterword-hint {
+  margin: -0.5em 0 1em;
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
+[aria-invalid="true"] {
+  outline: 2px solid #c0392b;
+  outline-offset: 1px;
+}
+
+.afterword-notice {
+  margin: 1em 0 0;
+  padding: 0.6em 0.8em;
+  border-left: 3px solid currentColor;
+}
+
+.afterword-notice--error {
+  border-left-color: #c0392b;
+}
+
+.afterword-notice--success {
+  border-left-color: #2e7d4f;
+}

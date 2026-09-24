@@ -1,0 +1,62 @@
+# /etc/systemd/system/afterword.service
+#
+# Assumes Afterword is installed in /opt/afterword/venv (see README) and runs
+# behind a reverse proxy on the same machine. Data lives in /var/lib/afterword.
+#
+#   sudo useradd --system --home /var/lib/afterword --shell /usr/sbin/nologin afterword
+#   sudo systemctl daemon-reload && sudo systemctl enable --now afterword
+#   sudo journalctl -u afterword      # the first-run setup link is printed here
+
+[Unit]
+Description=Afterword comment server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=afterword
+Group=afterword
+ExecStart=/opt/afterword/venv/bin/afterword serve
+Environment=AFTERWORD_DATA=/var/lib/afterword
+Environment=AFTERWORD_LISTEN=127.0.0.1:8080
+Environment=AFTERWORD_PUBLIC_URL=https://comments.example.com
+# Set to 0 to forbid installing Laya from the dashboard on this machine.
+Environment=AFTERWORD_LAYA_INSTALL=1
+Restart=on-failure
+RestartSec=5
+# Stops a managed Laya service together with Afterword.
+KillMode=control-group
+TimeoutStopSec=30
+
+StateDirectory=afterword
+StateDirectoryMode=0700
+UMask=0077
+
+# Hardening. Afterword (and a managed Laya) only need their data directory,
+# outbound network for installing Laya, and /tmp.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# Remove the next line if a managed Laya should use a GPU.
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+# Laya with PyTorch needs about 2 GB while running; this stops a runaway
+# process from taking the whole machine. Raise it if you use the
+# multilingual model as well.
+MemoryMax=3G
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "afterword"
+version = "1.0.0"
+description = "A small, self-hosted comment server for personal blogs such as WriteFreely"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = ["waitress>=3.0"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Framework :: Paste",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content :: Message Boards",
+]
+
+[project.scripts]
+afterword = "afterword.cli:main"
+
+[tool.setuptools]
+packages = ["afterword"]
+
+[tool.setuptools.package-data]
+afterword = ["static/*"]

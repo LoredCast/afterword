@@ -1,0 +1,20 @@
+# docker compose up -d        then: docker compose logs afterword   (setup link)
+services:
+  afterword:
+    build: .
+    restart: unless-stopped
+    environment:
+      AFTERWORD_PUBLIC_URL: https://comments.example.com
+      # The container only sees your reverse proxy through Docker's network,
+      # so trust forwarded headers from any address. This is safe ONLY because
+      # the port below is published on 127.0.0.1, not on the public interface.
+      AFTERWORD_TRUSTED_PROXY: "*"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - afterword-data:/data
+    # Laya needs about 2 GB of memory while it runs; without Laya, 128 MB is plenty.
+    mem_limit: 3g
+
+volumes:
+  afterword-data:

@@ -1,0 +1,11 @@
+# Caddy obtains and renews the HTTPS certificate automatically.
+# It also overwrites X-Forwarded-For/-Proto from clients, which Afterword
+# trusts only from 127.0.0.1 (AFTERWORD_TRUSTED_PROXY).
+comments.example.com {
+	encode gzip
+	header Strict-Transport-Security "max-age=31536000"
+	request_body {
+		max_size 1MB
+	}
+	reverse_proxy 127.0.0.1:8080
+}

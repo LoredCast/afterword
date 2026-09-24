@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "description": "Test-only dependencies for the Afterword widget tests",
+  "scripts": { "test": "node --test widget.test.js" },
+  "devDependencies": { "jsdom": "^24.1.3" }
+}
