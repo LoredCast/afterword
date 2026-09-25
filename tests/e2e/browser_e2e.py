@@ -5,7 +5,9 @@ WriteFreely post from a *different origin*, then drives Chromium through the
 whole owner and reader journey:
 
   first-run password -> blog address in Settings -> reader posts a comment ->
-  owner publishes it in the dashboard -> comment appears on the blog.
+  owner publishes it in the dashboard -> comment appears on the blog ->
+  owner turns on pseudonyms -> reader keeps a name -> a second browser cannot
+  use it -> the reader restores it there from the backup key -> verified marks.
 
 It also fails on any Content-Security-Policy violation or console error in
 the dashboard, and saves screenshots to e2e-screenshots/.
@@ -181,6 +183,83 @@ def main() -> None:
             assert button_bg == "rgb(0, 112, 201)", f"blog button style not applied: {button_bg}"
             reader.screenshot(path=f"{SHOTS}/4-blog-with-comments.png", full_page=True)
 
+            # 6. Pseudonyms: the owner turns them on; older comments stay unverified.
+            owner.goto(SERVER + "/admin/settings")
+            owner.check("#pseudonyms")
+            owner.click("text=Save settings")
+            expect(owner.locator(".flash-ok")).to_have_text("Settings saved.")
+            reader_requests: list = []
+            reader.on("request", lambda r: reader_requests.append(r))
+            reader.reload()
+            expect(reader.locator(".afterword-unverified")).to_have_count(2)
+            expect(reader.locator(".afterword-verified")).to_have_count(0)
+
+            # The reader keeps "Mara" as a pseudonym with their next comment.
+            reader.fill(".afterword-field--name input", "Mara")
+            reader.check(".afterword-field--keep input")
+            expect(reader.locator(".afterword-pseudonym-help")).to_contain_text("publicly linked")
+            reader.screenshot(path=f"{SHOTS}/9-blog-keep-pseudonym.png", full_page=True)
+            reader.fill(".afterword-field--message textarea", "Now with a name that stays mine.")
+            time.sleep(3.2)
+            reader.click(".afterword-submit")
+            expect(reader.locator(".afterword-notice--pending")).to_be_visible()
+            expect(reader.locator(".afterword-posting-as")).to_contain_text("Posting as Mara")
+            backup_key = reader.input_value(".afterword-backup-key")
+            assert re.fullmatch(r"(?:[a-z2-7]{4}-){7}[a-z2-7]{4}", backup_key), backup_key
+            with reader.expect_download() as download_info:
+                reader.click(".afterword-download")
+            backup_path = download_info.value.path()
+            with open(backup_path, encoding="utf-8") as fh:
+                backup_text = fh.read()
+            assert backup_key in backup_text and "Name: Mara" in backup_text, backup_text
+            reader.screenshot(path=f"{SHOTS}/10-blog-backup-key.png", full_page=True)
+            reader.reload()   # kept across visits
+            expect(reader.locator(".afterword-posting-as")).to_contain_text("Posting as Mara")
+            # Only posting a comment sends the key; loading the page and its comments never does.
+            raw_key = backup_key.replace("-", "")
+            for request in reader_requests:
+                assert raw_key not in request.url, request.url
+                if "/api/v1/comments" not in request.url:
+                    assert raw_key not in (request.post_data or ""), request.url
+
+            # A second browser cannot post as Mara, or as a look-alike...
+            other_context = browser.new_context(viewport={"width": 900, "height": 1200})
+            other = other_context.new_page()
+            other.on("pageerror", lambda e: reader_errors.append(str(e)))
+            other.goto(BLOG + "/on-keeping-a-notebook")
+            other.fill(".afterword-field--name input", "MARA")
+            other.fill(".afterword-field--message textarea", "It's me, honest.")
+            time.sleep(3.2)
+            other.click(".afterword-submit")
+            expect(other.locator(".afterword-notice--error")).to_contain_text("too close to someone")
+            # ...until the reader restores the pseudonym there from the backup file.
+            other.click(".afterword-restore summary")
+            other.fill(".afterword-field--restore input", backup_text)
+            other.click(".afterword-restore-button")
+            expect(other.locator(".afterword-posting-as")).to_contain_text("Posting as Mara")
+            other.click(".afterword-submit")
+            expect(other.locator(".afterword-notice--pending")).to_be_visible()
+
+            # The owner sees both under one pseudonym and publishes them.
+            owner.goto(SERVER + "/admin/comments")
+            expect(owner.locator(".comment .tag-pseudonym")).to_have_count(2)
+            owner.check("[data-select-all]")
+            owner.select_option("#action", "approve")
+            owner.click("text=Apply to selected")
+            expect(owner.locator(".flash-ok")).to_have_text("Published 2 comments.")
+            owner.click("nav >> text=Pseudonyms")
+            expect(owner.locator("table.pseudonyms tbody tr")).to_have_count(1)
+            owner.screenshot(path=f"{SHOTS}/11-dashboard-pseudonyms.png", full_page=True)
+
+            reader.reload()
+            expect(reader.locator(".afterword-comment")).to_have_count(4)
+            expect(reader.locator(".afterword-comment--verified")).to_have_count(2)
+            expect(reader.locator(".afterword-comment--verified .afterword-verified").first).to_have_text(
+                "\u2713 verified pseudonym")
+            expect(reader.locator(".afterword-unverified")).to_have_count(2)
+            reader.screenshot(path=f"{SHOTS}/12-blog-verified.png", full_page=True)
+            other_context.close()
+
             owner.goto(SERVER + "/admin/laya")
             owner.screenshot(path=f"{SHOTS}/5-laya-page.png", full_page=True)
             owner.goto(SERVER + "/admin/settings")
@@ -192,7 +271,7 @@ def main() -> None:
             mobile.click("button:has-text('Sign in')")
             expect(mobile.locator("h1")).to_have_text("Comments")
             mobile.goto(SERVER + "/admin/comments?status=approved")
-            expect(mobile.locator(".comment")).to_have_count(2)
+            expect(mobile.locator(".comment")).to_have_count(4)
             mobile.screenshot(path=f"{SHOTS}/7-dashboard-mobile.png", full_page=True)
             dark = browser.new_page(viewport={"width": 1100, "height": 900}, color_scheme="dark")
             dark.goto(SERVER + "/admin/login")
@@ -200,7 +279,7 @@ def main() -> None:
             dark.click("button:has-text('Sign in')")
             expect(dark.locator("h1")).to_have_text("Comments")
             dark.goto(SERVER + "/admin/comments?status=all")
-            expect(dark.locator(".comment")).to_have_count(2)
+            expect(dark.locator(".comment")).to_have_count(4)
             dark.screenshot(path=f"{SHOTS}/8-dashboard-dark.png", full_page=True)
             browser.close()
 

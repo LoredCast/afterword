@@ -4,7 +4,9 @@ A small, self-hosted comment server for personal blogs, made with self-hosted
 [WriteFreely](https://writefreely.org) in mind.
 
 Readers leave a comment with a name and a message, and optionally an email
-address that is never shown. No accounts, no likes, no tracking. Comments
+address that is never shown. No accounts, no likes, no tracking. If you like,
+readers can also keep their name as a [verified pseudonym](docs/pseudonyms.md),
+still without an account. Comments
 appear on your blog as ordinary HTML elements that your existing stylesheet
 already styles, and you moderate them from a compact dashboard.
 
@@ -20,6 +22,7 @@ say so.
 - **Safe by construction.** Comments are plain text. The server never produces HTML for them, and the widget never parses HTML. See the [threat model](docs/threat-model.md).
 - **Your CSS.** No iframe, no shadow DOM, documented `afterword-…` classes. See [styling](docs/styling.md).
 - **Three moderation modes.** Manual, assisted or automatic, switchable any time.
+- **Optional pseudonyms.** A reader can keep a name with a key held by their own browser. No account, email or third-party login. Nobody else can post under it, and readers see which names are verified.
 
 ## Quick start (try it locally)
 
@@ -128,6 +131,23 @@ what happens when Laya cannot answer (hold for review, by default) are all on
 that page, together with a table showing how often Laya agreed with your own
 decisions. Details and caveats: [docs/laya.md](docs/laya.md).
 
+## Pseudonyms
+
+Turn on **Settings → The comment form → Let readers keep a name as a verified
+pseudonym**. A reader who ticks **Keep this name as my pseudonym** gets a random
+key in their browser. Afterword keeps only a keyed hash of it. Comments sent
+with the key show the name with **✓ verified pseudonym**. Nobody else can post
+under that name, or one that looks like it, and every other name is shown as
+**unverified**. Readers can back up the key, restore it on another device, and
+are told that losing it without a backup can cost them the name. Comments from
+before a name was claimed are never marked.
+
+A pseudonym is not anonymity: its comments are publicly linked, and the server
+sees each request as it sees any comment. The **Pseudonyms** page in the
+dashboard lists the names held and lets you release one. Details, the naming
+policy and what "verified" does and does not mean:
+[docs/pseudonyms.md](docs/pseudonyms.md).
+
 ## Configuration
 
 Day-to-day settings live in the dashboard. These environment variables cover
@@ -160,11 +180,13 @@ contain email addresses, so keep them private.
 
 To upgrade, install the new version into the same environment and restart; the
 database is migrated automatically. If you pinned the widget with a
-Subresource Integrity hash, update it from **Add to your blog**.
+Subresource Integrity hash, update it from **Add to your blog**. Step-by-step
+instructions for 1.0 → 1.1, including Docker Compose, a trial run on a copy of
+your data, and rolling back, are in [UPGRADING.md](UPGRADING.md).
 
 ## What it deliberately doesn't do
 
-No reader accounts or social logins, no replies or voting, no email
+No reader accounts or social logins (pseudonyms need neither), no replies or voting, no email
 notifications, no Markdown beyond `*emphasis*`, `` `code` `` and links, no HTML
 ever, no images, no analytics. One dashboard user. If you need more than that,
 a full discussion platform is the better tool.

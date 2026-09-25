@@ -47,6 +47,7 @@ SPEC: list[Opt] = [
     Opt("formatting", "basic", "choice", choices=("plain", "basic")),
     Opt("linkify", True, "bool"),
     Opt("ask_email", True, "bool"),
+    Opt("pseudonyms", False, "bool"),
     Opt("thread_order", "oldest", "choice", choices=("oldest", "newest")),
     Opt("max_body_chars", 5000, "int", min=200, max=20000),
     # Basic checks

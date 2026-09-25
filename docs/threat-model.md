@@ -12,13 +12,14 @@ that are safe. It does not mean exploitation is impossible.
 | Readers of the blog | Comments are displayed on the blog's own pages, in the blog's origin. Script injection there would compromise every visitor. |
 | The blog owner's dashboard session | Whoever holds it can publish anything under the blog's name. |
 | Commenters' email addresses | Collected optionally and promised never to be shown. |
+| Pseudonyms (optional) | A reader who keeps a name relies on nobody else being able to post under it, and on readers being able to tell it from an unverified name. |
 | Comment integrity and availability | Comments should not be lost, altered or silently dropped. |
 | The server | Afterword runs on the owner's machine, sometimes next to WriteFreely. |
 
 ## Who might attack
 
 - **Spammers and bots**: high volume, automated, low effort. The main day-to-day threat.
-- **A malicious commenter**: crafts input to run script on the blog or in the dashboard, spoof other people, or mislead readers.
+- **A malicious commenter**: crafts input to run script on the blog or in the dashboard, spoof other people (including pseudonym holders), or mislead readers.
 - **A malicious website**: tries to use a visitor's browser to post comments, or to act in a logged-in owner's dashboard (CSRF).
 - **A network attacker**: sits between reader, blog and comment server.
 - **An attacker who compromises the comment server** (out of scope to prevent entirely; see residual risks).
@@ -95,6 +96,19 @@ Each safeguard names the test that checks it (`tests/…`).
 - Raw IP addresses are never stored: a keyed hash of the sender's network is kept for rate limiting and cleared from comments after 30 days. *test_raw_ip_never_stored, test_maintenance_purges_and_forgets*
 - The widget sends the page address without query string or fragment, and makes no requests anywhere except the comment server.
 
+### Pseudonyms (optional, off by default)
+
+See [pseudonyms.md](pseudonyms.md) for the full description.
+
+- A pseudonym is bound to a random 160-bit key made in the reader's browser with `crypto.getRandomValues`. The server stores only `HMAC-SHA-256(server secret, key)`, never the key; a leaked database or backup does not let anyone post as a pseudonym, and hashes cannot be matched across servers. *test_key_is_never_stored_or_returned, test_key_hash_depends_on_server_secret*
+- Only a request carrying the key gets the ✓ mark; a key only works with its own name, and a different key cannot claim a held name. *test_other_readers_cannot_post_as_the_pseudonym, test_key_only_works_with_its_own_name*
+- While the feature is on, a name that looks like a held one (compatibility forms, case, accents, spaces, punctuation, symbols and emoji, common Cyrillic/Greek look-alikes, `0`/`o`, `1`/`l`/`I`, `rn`/`m`) is refused, with or without a key, and check marks are refused in every name so no name can imitate the mark. Every other comment carries an "unverified" mark. *test_lookalikes_share_a_key, test_invalid_keys_and_names*
+- Verification is decided once, when a comment arrives, and stored with it. Existing comments, including those from before the upgrade, are never marked; releasing a pseudonym removes the mark from its comments, so a later holder of the same name cannot inherit them. *test_older_comments_are_never_marked, test_upgrade_from_1_0_keeps_comments_unverified, test_release*
+- A claim is created in the same transaction as its comment and only after every other check passed; a concurrent claim of the same name fails cleanly. *test_failed_submission_claims_nothing, test_same_key_twice_at_once_is_one_pseudonym*
+- The widget only uses the server's explicit `verified: true`, and sends the key only when posting or restoring, never when loading comments. *tests/js "verified and unverified marks…", "keeping a name…"; tests/e2e/browser_e2e.py*
+- Restoring a backup (`POST /api/v1/pseudonym`) answers only the blog's own origins and is limited to 10 attempts per sender every 10 minutes; it stores nothing. *test_restore, test_restore_is_rate_limited*
+- Squatting is bounded: a name is held only while one of its comments is kept, so rejected spam releases its names when it is purged, and the owner can release any name. *test_names_without_comments_are_released*
+
 ### Laya
 
 - Laya runs as a separate process, bound to `127.0.0.1` (overriding `laya-serve`'s default of `0.0.0.0`) with a random API key, and does not inherit Afterword's environment. *test_laya_manager.test_lifecycle*
@@ -118,8 +132,11 @@ Each safeguard names the test that checks it (`tests/…`).
 - **Installing Laya from the dashboard downloads and runs code** from PyPI (PyTorch, Laya and their dependencies) and model weights from Hugging Face. The Laya version is pinned, but its dependencies are not hash-pinned. Set `AFTERWORD_LAYA_INSTALL=0` to forbid this and run Laya yourself.
 - **Laya can be wrong or deliberately evaded.** Its own documentation says scores are not calibrated for a given site out of the box. Assisted mode keeps a human in charge; the dashboard shows how often Laya agreed with your past decisions.
 - **Determined, distributed spammers** can pass the basic checks; the global rate limit and moderation queue are the backstop. There is no CAPTCHA, by design.
-- **Impersonation**: names are not verified. Anyone can post as "Alice". This is inherent to account-free commenting.
-- **Backups contain email addresses** and the server's secret key; store them privately.
+- **Impersonation**: names are not verified unless they are pseudonyms. Without pseudonyms, anyone can post as "Alice"; with them on, only unverified look-alikes the comparison misses remain, and those carry the "unverified" mark rather than ✓.
+- **Pseudonym keys live in the blog's browser storage.** Any script running on the blog's pages (the blog itself, its plugins, or a modified `widget.js`) can read them. A reader who uses the same key on another site lets that site's operator post as them here. Readers who lose a key without a backup lose the name unless the owner releases it, and the owner cannot tell the real holder from an impostor.
+- **"Verified" is the comment server's word, not a proof readers can check themselves.** Whoever controls the server or its database can attach any name or mark to any comment.
+- **A pseudonym is not anonymity.** Its comments are publicly linked to each other, and the server sees and handles each request like any other comment (network address, keyed network hash, optional email).
+- **Backups contain email addresses**, the server's secret key and pseudonym key hashes; store them privately. With the secret, a leaked backup lets someone test whether a given key belongs to a pseudonym, but keys are 160-bit random values that cannot be guessed.
 - **Denial of service** beyond the built-in limits (e.g. large-scale traffic floods) should be handled by the reverse proxy or network.
 - **Single administrator**: there are no roles or audit log beyond the stored decision reasons.
 

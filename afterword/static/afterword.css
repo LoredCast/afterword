@@ -47,6 +47,22 @@
   font-weight: bold;
 }
 
+.afterword-verified,
+.afterword-unverified {
+  font-size: 0.8em;
+  white-space: nowrap;
+}
+
+.afterword-verified {
+  padding: 0 0.45em;
+  border: 1px solid currentColor;
+  border-radius: 1em;
+}
+
+.afterword-unverified {
+  opacity: 0.6;
+}
+
 .afterword-permalink,
 .afterword-permalink:visited {
   color: inherit;
@@ -106,6 +122,39 @@
   margin: -0.5em 0 1em;
   font-size: 0.85em;
   opacity: 0.7;
+}
+
+.afterword-pseudonym {
+  margin: -0.5em 0 1em;
+}
+
+.afterword-pseudonym p {
+  margin: 0 0 0.5em;
+}
+
+.afterword-pseudonym-policy,
+.afterword-pseudonym-help,
+.afterword-backup-help {
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
+.afterword-pseudonym summary {
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.afterword-pseudonym details {
+  margin: 0 0 0.5em;
+}
+
+.afterword-pseudonym details[open] {
+  padding-left: 0.8em;
+  border-left: 3px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+
+.afterword-backup-key {
+  font-family: ui-monospace, monospace;
 }
 
 [aria-invalid="true"] {

@@ -64,6 +64,20 @@ MIGRATIONS = [
         PRIMARY KEY (day, name)
     );
     """,
+    # 2: pseudonyms (see pseudonyms.py). Existing comments get no pseudonym, so
+    # nothing written before this version can ever show as verified.
+    """
+    CREATE TABLE pseudonyms (
+        id          INTEGER PRIMARY KEY,
+        name        TEXT NOT NULL,                      -- as claimed, shown with the mark
+        name_key    TEXT NOT NULL UNIQUE,               -- comparison form, blocks look-alikes
+        key_hash    TEXT NOT NULL UNIQUE,               -- HMAC of the reader's key, never the key
+        created_at  INTEGER NOT NULL
+    );
+    ALTER TABLE comments ADD COLUMN pseudonym_id INTEGER
+        REFERENCES pseudonyms (id) ON DELETE SET NULL;   -- set only when posted with the key
+    CREATE INDEX comments_pseudonym ON comments (pseudonym_id);
+    """,
 ]
 
 
