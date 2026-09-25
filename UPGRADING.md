@@ -14,7 +14,8 @@
 | **Rolling back** | 1.0 runs on a 1.1 database as it is. It ignores the new table and column, so you do not need to restore a backup to go back. |
 
 Downtime is the few seconds it takes to restart the container. The migration
-itself takes well under a second, even with many thousands of comments.
+itself is quick: a test database with 200,000 comments (120 MB) migrated in a
+tenth of a second.
 
 ### Upgrade with Docker Compose
 
@@ -31,16 +32,20 @@ docker compose exec afterword afterword version     # 1.0.0
 
 ```sh
 docker compose exec afterword afterword backup /data/afterword-1.0-backup.db
-docker compose cp afterword:/data/afterword-1.0-backup.db ./afterword-1.0-backup.db
+mkdir -p ~/afterword-backups
+docker compose cp afterword:/data/afterword-1.0-backup.db ~/afterword-backups/
+python3 -c "import sqlite3; print(sqlite3.connect('$HOME/afterword-backups/afterword-1.0-backup.db').execute('PRAGMA integrity_check').fetchone()[0])"
+                                                     # ok
 ```
 
 `afterword backup` uses SQLite's online backup, so the copy is consistent
 while the server keeps running. It refuses to overwrite an existing file. On
 Docker Compose versions without `cp`, use
-`docker cp "$(docker compose ps -q afterword)":/data/afterword-1.0-backup.db .`
+`docker cp "$(docker compose ps -q afterword)":/data/afterword-1.0-backup.db ~/afterword-backups/`
 
-The backup contains email addresses and the server's secret key. Keep it
-private, and delete it once you are happy with the upgrade.
+The backup contains email addresses and the server's secret key. It is kept
+outside the Git checkout on purpose, so it cannot be committed by accident.
+Keep it private, and delete it once you are happy with the upgrade.
 
 **3. Get version 1.1**
 
@@ -63,6 +68,10 @@ change that file. Check with `git status`.
 docker compose build --pull
 docker compose up -d
 ```
+
+`--pull` also fetches the latest `python:3.12-slim` base image with its
+security updates. If Docker Hub rate-limits you, leave it out; the build then
+reuses the base image you already have.
 
 Compose replaces the container and keeps the `afterword-data` volume. The new
 version migrates the database as it starts. Check that everything is in order:
@@ -117,7 +126,7 @@ docker compose exec afterword rm /data/afterword-1.0-backup.db
 1.0 simply ignores the pseudonym data:
 
 ```sh
-git switch master          # before the merge; afterwards: git switch --detach <the 1.0 commit>
+git switch master          # after the merge: git switch --detach 6b9919e   (1.0.0)
 docker compose build
 docker compose up -d
 ```
@@ -131,11 +140,11 @@ change made since the backup:
 
 ```sh
 docker compose stop afterword
-docker compose run --rm --no-deps --user root -v "$PWD:/restore:ro" afterword sh -c \
+docker compose run --rm --no-deps --user root -v ~/afterword-backups:/restore:ro afterword sh -c \
   'cp /restore/afterword-1.0-backup.db /data/afterword.db &&
    rm -f /data/afterword.db-wal /data/afterword.db-shm &&
-   chown 10001:10001 /data/afterword.db && chmod 600 /data/afterword.db'
-git switch master
+   chown afterword:afterword /data/afterword.db && chmod 600 /data/afterword.db'
+git switch master          # after the merge: git switch --detach 6b9919e   (1.0.0)
 docker compose build
 docker compose up -d
 ```
@@ -152,7 +161,7 @@ try pseudonyms on a local test page before touching the live service.
 git clone --branch claude/anonymous-persistent-identities-csjlr3 \
     https://github.com/LoredCast/afterword afterword-trial
 cd afterword-trial
-cp ../afterword/afterword-1.0-backup.db trial.db      # the backup from step 2
+cp ~/afterword-backups/afterword-1.0-backup.db trial.db      # the backup from step 2
 ```
 
 Save this as `compose.trial.yaml` in that folder. It is a complete file, not an
@@ -182,7 +191,7 @@ Load the copy into the trial volume and start it:
 ```sh
 docker compose -f compose.trial.yaml build
 docker compose -f compose.trial.yaml run --rm --no-deps --user root -v "$PWD:/restore:ro" afterword \
-  sh -c 'cp /restore/trial.db /data/afterword.db && chown -R 10001:10001 /data && chmod 600 /data/afterword.db'
+  sh -c 'cp /restore/trial.db /data/afterword.db && chown -R afterword:afterword /data && chmod 600 /data/afterword.db'
 docker compose -f compose.trial.yaml up -d
 ```
 
@@ -209,8 +218,8 @@ Now try it out:
 5. Things to try:
    - Old comments show **unverified**.
    - Tick **Keep this name as my pseudonym** and post.
-   - Publish the comment in the trial dashboard. It shows **✓ verified
-     pseudonym**.
+   - Publish the comment in the trial dashboard, unless your moderation mode
+     published it already. It shows **✓ verified pseudonym**.
    - In a private window, posting under the same name, or `NAME` in capitals,
      is refused.
    - Open **Restore a pseudonym from a backup key**, paste the key and post
@@ -231,7 +240,7 @@ rm trial.db
 ### Upgrade without Docker (systemd and a virtualenv)
 
 ```sh
-sudo -u afterword AFTERWORD_DATA=/var/lib/afterword /opt/afterword/venv/bin/afterword \
+sudo -u afterword /opt/afterword/venv/bin/afterword --data /var/lib/afterword \
     backup /var/lib/afterword/afterword-1.0-backup.db
 cd /path/to/afterword && git fetch origin && git switch claude/anonymous-persistent-identities-csjlr3
 sudo /opt/afterword/venv/bin/pip install /path/to/afterword
