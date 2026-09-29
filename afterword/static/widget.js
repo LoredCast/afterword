@@ -1,4 +1,4 @@
-/*! Afterword comment widget 1.2.0 — https://github.com/ (see README) — MIT */
+/*! Afterword comment widget 1.3.0 — https://github.com/ (see README) — MIT */
 /*
  * Usage (see docs/embedding.md):
  *   <div data-afterword data-thread="post-id"></div>
@@ -33,6 +33,7 @@
     reply: "Reply",
     replyingTo: "Replying to",
     cancelReply: "Cancel reply",
+    info: "What does this mean?",
     loading: "Loading comments…",
     loadError: "Comments could not be loaded.",
     empty: "No comments yet.",
@@ -120,6 +121,33 @@
       }
     });
     return link;
+  }
+
+  // A small "?" that keeps an explanation out of the way: hovering shows it as
+  // the browser's own tooltip (no CSS needed), and a click, tap, Enter or Space
+  // shows it inline for touch and keyboard users. Escape or leaving hides it.
+  function info(id, text, label) {
+    var box = el("span", "afterword-info");
+    var tip = el("span", "afterword-info-text", text);
+    tip.id = id;
+    tip.hidden = true;
+    var mark = action("afterword-info-mark", "?", function () { show(tip.hidden); });
+    function show(on) {
+      tip.hidden = !on;
+      mark.setAttribute("aria-expanded", on ? "true" : "false");
+    }
+    mark.title = text;
+    mark.setAttribute("aria-label", label);
+    mark.setAttribute("aria-expanded", "false");
+    mark.setAttribute("aria-controls", id);
+    mark.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") show(false);
+    });
+    mark.addEventListener("blur", function () { show(false); });
+    box.appendChild(mark);
+    box.appendChild(document.createTextNode(" "));
+    box.appendChild(tip);
+    return box;
   }
 
   function formatDate(date, withTime) {
@@ -296,20 +324,22 @@
 
     if (data.open && data.form) {
       this.token = data.form.token;
+      // The form folds away under "Write a comment" (open and close it like
+      // "Restore a pseudonym"), unless the page asks for it open: data-form="open".
+      this.collapsible = this.root.dataset.form !== "open";
       this.formEl = this.form(data.form);
-      // Collapsed behind a link unless the page asks for it open (data-form="open").
-      if (this.root.dataset.form !== "open") {
+      if (this.collapsible) {
         var self = this;
-        this.formEl.hidden = true;
-        var compose = action("afterword-compose-button", this.t("compose"),
-                             function () { self.openForm(); }, "#" + this.formEl.id);
-        compose.setAttribute("aria-expanded", "false");
-        compose.setAttribute("aria-controls", this.formEl.id);
-        this.composeRow = el("p", "afterword-compose");
-        this.composeRow.appendChild(compose);
-        this.root.appendChild(this.composeRow);
+        this.composeEl = el("details", "afterword-compose");
+        this.composeEl.appendChild(el("summary", "afterword-compose-summary", this.t("compose")));
+        this.composeEl.appendChild(this.formEl);
+        this.composeEl.addEventListener("toggle", function () {
+          if (!self.composeEl.open) self.cancelReply();       // closing it drops a reply in progress
+        });
+        this.root.appendChild(this.composeEl);
+      } else {
+        this.root.appendChild(this.formEl);
       }
-      this.root.appendChild(this.formEl);
       this.setState("ready");
     } else {
       this.root.appendChild(el("p", "afterword-closed", this.t("closed")));
@@ -328,11 +358,7 @@
 
   Widget.prototype.openForm = function (focus) {
     if (!this.formEl) return;
-    this.formEl.hidden = false;
-    if (this.composeRow) {
-      this.composeRow.hidden = true;
-      this.composeRow.firstChild.setAttribute("aria-expanded", "true");
-    }
+    if (this.composeEl) this.composeEl.open = true;
     var target = focus || (this.nameInput && !this.nameInput.closest("[hidden]") && !this.nameInput.value
       ? this.nameInput : this.messageInput);
     if (target && target.focus) target.focus();
@@ -513,13 +539,19 @@
     return wrap;
   };
 
-  Widget.prototype.field = function (kind, label, control) {
+  // A label and its control, with an optional "?" explanation between them.
+  Widget.prototype.field = function (kind, label, control, explanation) {
     var id = "afterword-" + kind + "-" + this.n;
     var row = el("p", "afterword-field afterword-field--" + kind);
     var lab = el("label", "afterword-label", label);
     lab.htmlFor = id;
     control.id = id;
     row.appendChild(lab);
+    if (explanation) {
+      row.appendChild(document.createTextNode(" "));
+      row.appendChild(explanation);
+      row.appendChild(document.createTextNode(" "));
+    }
     row.appendChild(control);
     return row;
   };
@@ -562,14 +594,14 @@
 
       var backup = el("details", "afterword-backup");
       backup.appendChild(el("summary", null, t("backup")));
-      backup.appendChild(el("p", "afterword-backup-help", t("backupHelp", { name: current.name })));
       var field = el("input", "afterword-input afterword-backup-key");
       field.type = "text";
       field.readOnly = true;
       field.spellcheck = false;
       field.autocomplete = "off";
       field.value = formatKey(current.key);
-      backup.appendChild(self.field("backup", t("backup"), field));
+      backup.appendChild(self.field("backup", t("backup"), field,
+        info("afterword-backup-help-" + n, t("backupHelp", { name: current.name }), t("info"))));
       var copied = el("span", "afterword-copied");
       copied.setAttribute("role", "status");
       var copy = action("afterword-copy", t("copy"), function () {
@@ -602,7 +634,6 @@
     }
 
     function drawFree() {
-      box.appendChild(el("p", "afterword-pseudonym-policy", t("namePolicy")));
       if (!canMakeKeys()) return;
       keep = el("input", "afterword-keep");
       keep.type = "checkbox";
@@ -610,13 +641,10 @@
       keep.id = "afterword-keep-" + n;
       var label = el("label", "afterword-keep-label", t("keep"));
       label.htmlFor = keep.id;
-      var help = el("p", "afterword-pseudonym-help", t("keepHelp"));
-      help.id = "afterword-keep-help-" + n;
-      help.hidden = true;
-      keep.setAttribute("aria-describedby", help.id);
-      keep.addEventListener("change", function () { help.hidden = !keep.checked; });
-      box.appendChild(wrap("p", "afterword-field afterword-field--keep", [keep, " ", label]));
-      box.appendChild(help);
+      var helpId = "afterword-keep-help-" + n;
+      keep.setAttribute("aria-describedby", helpId);
+      box.appendChild(wrap("p", "afterword-field afterword-field--keep",
+                           [keep, " ", label, " ", info(helpId, t("keepHelp"), t("info"))]));
 
       var restore = el("details", "afterword-restore");
       restore.appendChild(el("summary", null, t("restore")));
@@ -718,7 +746,7 @@
     var form = el("form", "afterword-form");
     form.id = "afterword-form-" + this.n;
     form.setAttribute("novalidate", "");
-    if (this.t("formHeading")) {
+    if (!this.collapsible && this.t("formHeading")) {
       form.appendChild(el("h" + Math.min(6, this.level + 1), "afterword-form-heading", this.t("formHeading")));
     }
     this.replying = form.appendChild(el("p", "afterword-replying"));
@@ -731,7 +759,12 @@
     name.required = true;
     name.maxLength = cfg.maxName || 80;
     name.autocomplete = "name";
-    var nameRow = form.appendChild(this.field("name", this.t("name"), name));
+    var policy = null;
+    if (this.pseudonyms) {
+      policy = info("afterword-policy-" + this.n, this.t("namePolicy"), this.t("info"));
+      name.setAttribute("aria-describedby", "afterword-policy-" + this.n);
+    }
+    var nameRow = form.appendChild(this.field("name", this.t("name"), name, policy));
     var pseudonym = this.pseudonyms ? this.pseudonymPart(nameRow, name) : null;
     if (pseudonym) form.appendChild(pseudonym.root);
 
@@ -754,12 +787,9 @@
     message.maxLength = cfg.maxBody || 5000;
     var hintId = "afterword-hint-" + this.n;
     message.setAttribute("aria-describedby", hintId);
-    form.appendChild(this.field("message", this.t("message"), message));
-
     var hintKey = cfg.formatting === "basic" ? (cfg.links ? "hintBasic" : "hintBasicNoLinks") : "hintPlain";
-    var hint = el("p", "afterword-hint", this.t(hintKey));
-    hint.id = hintId;
-    form.appendChild(hint);
+    form.appendChild(this.field("message", this.t("message"), message,
+                                info(hintId, this.t(hintKey), this.t("info"))));
 
     // Honeypot: hidden from people (and from assistive technology), tempting to bots.
     var trap = el("div", "afterword-hp");
@@ -892,7 +922,7 @@
     for (var i = 0; i < nodes.length; i++) new Widget(nodes[i]).start();
   }
 
-  window.Afterword = { init: init, version: "1.2.0" };
+  window.Afterword = { init: init, version: "1.3.0" };
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () { init(); });
   } else {

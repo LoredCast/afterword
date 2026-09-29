@@ -13,7 +13,7 @@ checkout). The service is called `afterword`, as in the shipped `compose.yaml`.
 **1. Check what is running**
 
 ```sh
-docker compose exec afterword afterword version     # e.g. 1.1.0
+docker compose exec afterword afterword version     # e.g. 1.2.0
 ```
 
 **2. Back up the database, and copy the backup out of the container**
@@ -66,10 +66,10 @@ is in order:
 
 ```sh
 docker compose ps                                    # "healthy" after about 30 seconds
-docker compose logs --tail=20 afterword              # "Afterword 1.2.0 listening on …", no tracebacks
-docker compose exec afterword afterword version      # 1.2.0
+docker compose logs --tail=20 afterword              # "Afterword 1.3.0 listening on …", no tracebacks
+docker compose exec afterword afterword version      # 1.3.0
 docker compose exec afterword python -c "import sqlite3; print(sqlite3.connect('/data/afterword.db').execute('PRAGMA user_version').fetchone()[0])"
-                                                     # 3 for 1.2 (2 for 1.1)
+                                                     # 3 for 1.2 and later (2 for 1.1)
 ```
 
 Then open the dashboard and a post on your blog. Comments load and can be sent
@@ -109,7 +109,7 @@ older version runs on a newer database as it is. It ignores the tables and
 columns it does not know:
 
 ```sh
-git checkout b284663        # 1.1.0   (1.0.0 is 6b9919e)
+git checkout dfc1fa2        # 1.2.0   (1.1.0 is b284663, 1.0.0 is 6b9919e)
 docker compose up -d --build
 ```
 
@@ -127,7 +127,7 @@ docker compose run --rm --no-deps --user root -v ~/afterword-backups:/restore:ro
   'cp /restore/afterword-before-upgrade.db /data/afterword.db &&
    rm -f /data/afterword.db-wal /data/afterword.db-shm &&
    chown afterword:afterword /data/afterword.db && chmod 600 /data/afterword.db'
-git checkout b284663        # the version you came from
+git checkout dfc1fa2        # the version you came from
 docker compose up -d --build
 ```
 
@@ -226,13 +226,22 @@ sudo -u afterword /opt/afterword/venv/bin/afterword --data /var/lib/afterword \
 cd /path/to/afterword && git pull
 sudo /opt/afterword/venv/bin/pip install /path/to/afterword
 sudo systemctl restart afterword
-sudo journalctl -u afterword -n 20                 # "Afterword 1.2.0 listening on …"
+sudo journalctl -u afterword -n 20                 # "Afterword 1.3.0 listening on …"
 ```
 
 Then carry on with step 5 above. To roll back, check out the older version,
 install it the same way and restart. The database needs no change.
 
 ## Version notes
+
+### 1.3: a fold-open form and tidier explanations
+
+| | |
+|---|---|
+| **"Write a comment"** | Now opens *and closes* the form, like “Restore a pseudonym” (a `<details>` disclosure). A reply opens it too; closing it drops a reply in progress. With `data-form="open"` the form is shown as before, under its “Leave a comment” heading. |
+| **Explanations behind "?"** | The formatting hint, the naming policy, what keeping a pseudonym means, and the backup-key advice no longer take up space. Each sits behind a small **?**: hover for a tooltip, or click, tap, Enter or Space to show it on the page. |
+| **`widget.js`, `afterword.css`** | Changed: update a pinned SRI hash (step 5). If you copied `afterword.css`, take the new `.afterword-compose` and `.afterword-info…` rules (labels are now `inline-block` so the **?** fits beside them). |
+| **Database, configuration** | Unchanged (schema 3). |
 
 ### 1.2: replies, a collapsed form, a plain "verified" mark
 

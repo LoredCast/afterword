@@ -33,8 +33,8 @@ For pages that add content later, call `Afterword.init()` (or
 | `data-thread-from="path"` | Default when `data-thread` is absent: the page's path, without a trailing slash (`/my-post`). Query strings and fragments are ignored. |
 | `data-thread-from="canonical"` | The path of the page's `<link rel="canonical">`. Useful when one post is reachable at several addresses. |
 | `data-server="https://…"` | Override the server address (normally taken from the script's URL). |
-| `data-heading-level="2"` | Level of the "Comments" heading (2–6). The form heading is one level lower. |
-| `data-form="open"` | Show the comment form straight away. By default it is collapsed behind a “Write a comment” link, so only the comments are open. |
+| `data-heading-level="2"` | Level of the "Comments" heading (2–6). The form heading (with `data-form="open"`) is one level lower. |
+| `data-form="open"` | Show the comment form straight away, under a “Leave a comment” heading. By default it is folded away under “Write a comment”, which opens and closes it like any disclosure, so only the comments are open. |
 | `data-remember="true"` | Remember the reader's name and email in their browser (localStorage) for next time. Off by default. |
 | `data-text-…="…"` | Replace any piece of text; see below. |
 
@@ -60,8 +60,9 @@ empty string to leave it out.
 | Attribute | Default |
 |---|---|
 | `data-text-heading` | Comments |
-| `data-text-form-heading` | Leave a comment |
-| `data-text-compose` | Write a comment (the link that opens the form) |
+| `data-text-form-heading` | Leave a comment (only with `data-form="open"`) |
+| `data-text-compose` | Write a comment (opens and closes the form) |
+| `data-text-info` | What does this mean? (read out by screen readers for each “?”) |
 | `data-text-reply` | Reply |
 | `data-text-replying-to` | Replying to |
 | `data-text-cancel-reply` | Cancel reply |
@@ -76,7 +77,7 @@ empty string to leave it out.
 | `data-text-sending` | Posting… |
 | `data-text-published` | Thanks, your comment is published. |
 | `data-text-pending` | Thanks! Your comment will appear once it has been reviewed. |
-| `data-text-hint-plain` | Plain text. Line breaks are kept. |
+| `data-text-hint-plain` | Plain text. Line breaks are kept. (Behind the “?” next to “Comment”, like the two below.) |
 | `data-text-hint-basic` | Plain text. Links, \*emphasis\* and \`code\` work; HTML is shown as typed. |
 | `data-text-hint-basic-no-links` | Plain text. \*Emphasis\* and \`code\` work; HTML is shown as typed. |
 | `data-text-honeypot` | Leave this field empty (label of the hidden spam trap) |
@@ -167,21 +168,23 @@ This is what the widget builds inside your container (one comment with one reply
        <span class="afterword-verified" title="…">verified</span>
        <span class="afterword-unverified" title="…">unverified</span>
        and a verified comment's <li> gets afterword-comment--verified. -->
-  <p class="afterword-compose"><a class="afterword-compose-button" role="button"
-     href="#afterword-form-1" aria-expanded="false">Write a comment</a></p>   <!-- not with data-form="open" -->
-  <form class="afterword-form" id="afterword-form-1" hidden>   <!-- shown by the button or a Reply -->
-    <h3 class="afterword-form-heading">Leave a comment</h3>
+  <details class="afterword-compose">   <!-- opened by its summary or a Reply; not with data-form="open" -->
+  <summary class="afterword-compose-summary">Write a comment</summary>
+  <form class="afterword-form" id="afterword-form-1">
+    <!-- with data-form="open" there is no <details>, and the form starts with
+         <h3 class="afterword-form-heading">Leave a comment</h3> -->
     <p class="afterword-replying" hidden>Replying to <a class="afterword-reply-ref" href="#comment-…">@Mara · …</a>
       <a class="afterword-cancel-reply" role="button" href="#">Cancel reply</a></p>
     <p class="afterword-field afterword-field--name">
-      <label class="afterword-label">Name</label> <input class="afterword-input">
+      <label class="afterword-label">Name</label>
+      <span class="afterword-info">…</span>          <!-- the naming policy; only with pseudonyms on -->
+      <input class="afterword-input">
     </p>
     <div class="afterword-pseudonym">                <!-- only with pseudonyms on -->
-      <p class="afterword-pseudonym-policy">Names marked “verified” are pseudonyms…</p>
       <p class="afterword-field afterword-field--keep">
         <input class="afterword-keep" type="checkbox"> <label class="afterword-keep-label">Keep this name…</label>
+        <span class="afterword-info">…</span>        <!-- what keeping a name means -->
       </p>
-      <p class="afterword-pseudonym-help" hidden>Your browser will hold a secret key…</p>
       <details class="afterword-restore"><summary>Restore a pseudonym…</summary>
         <p class="afterword-field afterword-field--restore">…</p>
         <p class="afterword-restore-actions"><a class="afterword-restore-button" role="button" href="#">Restore</a></p>
@@ -189,13 +192,19 @@ This is what the widget builds inside your container (one comment with one reply
     </div>
     <p class="afterword-field afterword-field--email">…</p>
     <p class="afterword-field afterword-field--message">
-      <label class="afterword-label">Comment</label> <textarea class="afterword-textarea"></textarea>
+      <label class="afterword-label">Comment</label>
+      <span class="afterword-info">
+        <a class="afterword-info-mark" role="button" href="#" title="Plain text. Links…"
+           aria-label="What does this mean?" aria-expanded="false" aria-controls="afterword-hint-1">?</a>
+        <span class="afterword-info-text" id="afterword-hint-1" hidden>Plain text. Links, *emphasis* and `code` work…</span>
+      </span>
+      <textarea class="afterword-textarea" aria-describedby="afterword-hint-1"></textarea>
     </p>
-    <p class="afterword-hint">Plain text. Links, *emphasis* and `code` work…</p>
     <div class="afterword-hp" aria-hidden="true">…</div>
     <p class="afterword-actions"><button class="afterword-submit" type="submit">Post comment</button></p>
     <p class="afterword-notice afterword-notice--pending" role="status">Thanks! …</p>
   </form>
+</details>
 </div>
 ```
 
@@ -221,7 +230,7 @@ This is what the widget builds inside your container (one comment with one reply
 | `afterword-reply-to`, `afterword-reply-ref` | The “@Mara · date” line of a reply; a link when that comment is on the page |
 | `afterword-empty` | "No comments yet." (hidden when there are comments) |
 | `afterword-closed` | "Comments are closed." |
-| `afterword-compose`, `afterword-compose-button` | “Write a comment”, which opens the collapsed form |
+| `afterword-compose`, `afterword-compose-summary` | The `<details>` the form folds into, and its “Write a comment” summary |
 | `afterword-form` | The form (`hidden` until opened, unless `data-form="open"`) |
 | `afterword-form-heading` | "Leave a comment" |
 | `afterword-replying`, `afterword-cancel-reply` | “Replying to @Mara · date” and “Cancel reply” while answering a comment |
@@ -230,7 +239,7 @@ This is what the widget builds inside your container (one comment with one reply
 | `afterword-label` | Labels |
 | `afterword-input` | Name and email inputs |
 | `afterword-textarea` | The comment box |
-| `afterword-hint` | Formatting hint under the comment box |
+| `afterword-info` | A “?” explanation: the `afterword-info-mark` link and its `afterword-info-text`. Hovering the “?” shows the text as the browser’s tooltip (its `title`); a click, tap, Enter or Space shows `afterword-info-text` (`hidden` until then), which the starter CSS draws as a small bubble |
 | `afterword-hp` | Hidden spam trap. Do not make it visible. |
 | `afterword-actions` | Row containing the button |
 | `afterword-submit` | The “Post comment” button, the only `<button>` |
@@ -245,8 +254,8 @@ instead:
 <p class="afterword-posting-as">Posting as <strong class="afterword-pseudonym-name">Mara</strong>
   <span class="afterword-verified">verified</span></p>
 <details class="afterword-backup"><summary>Backup key</summary>
-  <p class="afterword-backup-help">Anyone with this key…</p>
-  <p class="afterword-field afterword-field--backup">… <input class="afterword-input afterword-backup-key" readonly></p>
+  <p class="afterword-field afterword-field--backup"><label>Backup key</label>
+     <span class="afterword-info">…</span> <input class="afterword-input afterword-backup-key" readonly></p>
   <p class="afterword-backup-actions"><a class="afterword-copy" role="button" href="#">Copy</a>
      <a class="afterword-download" download>Download</a> <span class="afterword-copied"></span></p>
 </details>
@@ -259,19 +268,18 @@ instead:
 | `afterword-unverified` | The mark on every other comment while pseudonyms are on |
 | `afterword-comment--verified` | A comment `<li>` posted with the key |
 | `afterword-pseudonym` | Block under the name field (`--held` once the reader holds one) |
-| `afterword-pseudonym-policy` | The naming policy |
 | `afterword-field--keep`, `afterword-keep`, `afterword-keep-label` | The “Keep this name” row, checkbox and label |
-| `afterword-pseudonym-help` | What keeping a name means (shown when ticked) |
 | `afterword-restore`, `afterword-field--restore`, `afterword-restore-button` | Restoring from a backup key |
 | `afterword-posting-as`, `afterword-pseudonym-name` | “Posting as Mara” |
-| `afterword-backup`, `afterword-backup-help`, `afterword-backup-key` | The backup key |
+| `afterword-backup`, `afterword-backup-key` | The backup key |
 | `afterword-copy`, `afterword-download`, `afterword-copied` | Copy, download, and “Copied.” |
 | `afterword-forget` | “Stop using it on this device” |
 
-**Post comment** is the widget’s only `<button>`. Every other control (Write a
-comment, Reply, Cancel reply, Restore, Copy, Stop using it on this device) is an
-`<a role="button">`, so your theme’s link style applies to it and its button
-style does not. They work with Enter and Space like buttons.
+**Post comment** is the widget’s only `<button>`. “Write a comment”, “Restore a
+pseudonym” and “Backup key” are `<summary>` disclosures. Every other control
+(Reply, Cancel reply, Restore, Copy, Stop using it on this device, and each “?”)
+is an `<a role="button">`, so your theme’s link style applies to it and its
+button style does not. They work with Enter and Space like buttons.
 
 Invalid fields get `aria-invalid="true"`; the form gets `aria-busy="true"`
 while sending.

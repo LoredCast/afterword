@@ -145,8 +145,11 @@ def main() -> None:
             reader.goto(BLOG + "/on-keeping-a-notebook")
             expect(reader.locator(".afterword-form")).to_be_hidden()      # collapsed until wanted
             expect(reader.locator(".afterword-empty")).to_have_text("No comments yet.")
-            reader.click(".afterword-compose-button")
+            reader.click(".afterword-compose > summary")
             expect(reader.locator(".afterword-form")).to_be_visible()
+            reader.click(".afterword-compose > summary")                 # folds shut again
+            expect(reader.locator(".afterword-form")).to_be_hidden()
+            reader.click(".afterword-compose > summary")
             reader.fill(".afterword-field--name input", "Mara")
             reader.fill(".afterword-field--email input", "mara@example.org")
             reader.fill(".afterword-field--message textarea",
@@ -199,10 +202,17 @@ def main() -> None:
             expect(reader.locator(".afterword-verified")).to_have_count(0)
 
             # The reader keeps "Mara" as a pseudonym with their next comment.
-            reader.click(".afterword-compose-button")
+            reader.click(".afterword-compose > summary")
             reader.fill(".afterword-field--name input", "Mara")
             reader.check(".afterword-field--keep input")
-            expect(reader.locator(".afterword-pseudonym-help")).to_contain_text("publicly linked")
+            # The explanation waits behind a "?": a tooltip on hover, text on click.
+            keep_help = reader.locator(".afterword-field--keep .afterword-info-text")
+            expect(keep_help).to_be_hidden()
+            expect(reader.locator(".afterword-field--keep .afterword-info-mark")).to_have_attribute(
+                "title", re.compile("publicly linked"))
+            reader.click(".afterword-field--keep .afterword-info-mark")
+            expect(keep_help).to_be_visible()
+            expect(keep_help).to_contain_text("publicly linked")
             reader.screenshot(path=f"{SHOTS}/9-blog-keep-pseudonym.png", full_page=True)
             reader.fill(".afterword-field--message textarea", "Now with a name that stays mine.")
             time.sleep(3.2)
@@ -219,7 +229,7 @@ def main() -> None:
             assert backup_key in backup_text and "Name: Mara" in backup_text, backup_text
             reader.screenshot(path=f"{SHOTS}/10-blog-backup-key.png", full_page=True)
             reader.reload()   # kept across visits
-            reader.click(".afterword-compose-button")
+            reader.click(".afterword-compose > summary")
             expect(reader.locator(".afterword-posting-as")).to_contain_text("Posting as Mara")
             # Only posting a comment sends the key; loading the page and its comments never does.
             raw_key = backup_key.replace("-", "")
@@ -233,7 +243,7 @@ def main() -> None:
             other = other_context.new_page()
             other.on("pageerror", lambda e: reader_errors.append(str(e)))
             other.goto(BLOG + "/on-keeping-a-notebook")
-            other.click(".afterword-compose-button")
+            other.click(".afterword-compose > summary")
             other.fill(".afterword-field--name input", "MARA")
             other.fill(".afterword-field--message textarea", "It's me, honest.")
             time.sleep(3.2)
@@ -312,7 +322,7 @@ def main() -> None:
             # so the blog's button style (a blue box here) never applies to them.
             tags = reader.eval_on_selector_all("#comments button", "bs => bs.map(b => b.className)")
             assert tags == ["afterword-submit"], tags
-            for selector in (".afterword-reply-button", ".afterword-compose-button", ".afterword-forget"):
+            for selector in (".afterword-reply-button", ".afterword-info-mark", ".afterword-forget"):
                 look = reader.eval_on_selector(selector, "a => [a.tagName, getComputedStyle(a).backgroundColor]")
                 assert look == ["A", "rgba(0, 0, 0, 0)"], (selector, look)
             reader.screenshot(path=f"{SHOTS}/13-blog-replies.png", full_page=True)
