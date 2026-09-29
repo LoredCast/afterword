@@ -1,4 +1,4 @@
-/*! Afterword comment widget 1.0.0 — https://github.com/ (see README) — MIT */
+/*! Afterword comment widget 1.1.0 — https://github.com/ (see README) — MIT */
 /*
  * Usage (see docs/embedding.md):
  *   <div data-afterword data-thread="post-id"></div>
@@ -10,6 +10,9 @@
  *   - Links are rebuilt from a URL string, allowed only for http(s) without
  *     credentials, and always get rel="nofollow ugc noopener noreferrer".
  *   - Requests never include cookies (credentials: "omit").
+ *   - A pseudonym key (see docs/pseudonyms.md) is made here with
+ *     crypto.getRandomValues, kept in this site's localStorage, and sent only
+ *     when posting a comment or restoring a backup, never when loading comments.
  */
 (function () {
   "use strict";
@@ -17,6 +20,9 @@
   var script = document.currentScript;
   var SCRIPT_BASE = script && script.src ? new URL("./", script.src).href : null;
   var instances = 0;
+  var STORE = "afterword:pseudonym";
+  var PENDING = "afterword:pseudonym-pending";   // a claim sent but not yet confirmed
+  var KEY_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
 
   var STRINGS = {
     heading: "Comments",
@@ -45,7 +51,37 @@
     errorBodyRequired: "Please write a comment.",
     errorEmailInvalid: "That email address does not look right.",
     errorCommentsClosed: "Comments are closed.",
-    errorOriginNotAllowed: "This site is not set up to post comments."
+    errorOriginNotAllowed: "This site is not set up to post comments.",
+    verified: "\u2713 verified pseudonym",
+    verifiedTitle: "Only the holder of this pseudonym\u2019s key can post under it here. It says nothing about who they are.",
+    unverified: "unverified",
+    unverifiedTitle: "This name is not a pseudonym. Anyone can post under it.",
+    namePolicy: "Names marked \u2713 are pseudonyms. Only their holder can post under them, or under a name that looks like them. Any other name is shown as unverified.",
+    keep: "Keep this name as my pseudonym",
+    keepHelp: "Your browser will hold a secret key so that only you can post under this name here. No account, no email. Comments under a pseudonym are publicly linked to each other, and this site still sees your network address as with any comment. Save the backup key you are shown next: without it, clearing your browser or changing device can cost you the name.",
+    kept: "{name} is now your pseudonym here. Save your backup key now.",
+    keptNoStorage: "{name} is now your pseudonym here, but this browser will not keep its key after you leave. Save your backup key now: you need it to post as {name} again.",
+    postingAs: "Posting as",
+    backup: "Backup key",
+    backupHelp: "Anyone with this key can post as {name} here, so keep it private, for example in a password manager. Use it to restore your pseudonym on another device or after clearing your browser, and only on this site.",
+    backupFile: "Afterword pseudonym backup\n\nName: {name}\nSite: {site}\nKey:  {key}\n\nAnyone with this key can post as {name} on this site. Keep it private.\nTo use it on another device, open a post on {site}, choose\n\u201cRestore a pseudonym from a backup key\u201d under the comment form, and paste the key.\n",
+    copy: "Copy",
+    copied: "Copied.",
+    download: "Download",
+    forget: "Stop using it on this device",
+    forgetConfirm: "Stop using {name} on this device? Without your backup key you cannot post as {name} again.",
+    restore: "Restore a pseudonym from a backup key",
+    restoreKey: "Backup key",
+    restoreButton: "Restore",
+    restored: "Welcome back. You are posting as {name}.",
+    errorPseudonymTaken: "That name, or one that looks very like it, is already someone\u2019s pseudonym here. Please choose another.",
+    errorPseudonymLost: "{name} is no longer held by your key here: the site\u2019s owner released it and someone else has taken it since. Stop using it on this device to post under another name.",
+    errorNameReserved: "That name is too close to someone\u2019s pseudonym here. Please choose a different name, or restore your backup key if the pseudonym is yours.",
+    errorNameCheckMark: "Please leave check marks out of your name; they mark verified pseudonyms.",
+    errorPseudonymNameInvalid: "A pseudonym needs at least one letter or digit.",
+    errorPseudonymKeyInvalid: "That backup key does not look right.",
+    errorPseudonymUnknown: "No pseudonym on this site uses that key.",
+    errorPseudonymsOff: "Pseudonyms are turned off here right now. Reload the page to post without one."
   };
 
   function camel(code) {
@@ -57,6 +93,51 @@
     if (className) node.className = className;
     if (text !== undefined && text !== null) node.textContent = String(text);
     return node;
+  }
+
+  function fill(text, values) {
+    return String(text).replace(/\{(\w+)\}/g, function (all, name) {
+      return values && values[name] !== undefined ? String(values[name]) : all;
+    });
+  }
+
+  // -- pseudonym keys: 32 base32 characters, 160 random bits ------------------
+  function canMakeKeys() {
+    return !!(window.crypto && window.crypto.getRandomValues && window.Uint8Array);
+  }
+
+  function newKey() {
+    var bytes = new Uint8Array(32);
+    window.crypto.getRandomValues(bytes);
+    var key = "";
+    for (var i = 0; i < bytes.length; i++) key += KEY_ALPHABET.charAt(bytes[i] & 31);
+    return key;
+  }
+
+  function formatKey(key) { return key.match(/.{4}/g).join("-"); }
+
+  // Accepts the key with or without dashes, or a whole pasted backup file.
+  function parseKey(text) {
+    var found = /(?:[a-z2-7]{4}-){7}[a-z2-7]{4}/i.exec(String(text));
+    var key = (found ? found[0] : String(text)).toLowerCase().replace(/[\s-]/g, "");
+    return /^[a-z2-7]{32}$/.test(key) ? key : null;
+  }
+
+  function loadPseudonym(slot) {
+    var value = null;
+    try { value = JSON.parse(localStorage.getItem(slot) || "null"); } catch (e) { return null; }
+    if (!value || typeof value.name !== "string" || !value.name || !parseKey(value.key)) return null;
+    return { name: value.name, key: parseKey(value.key) };
+  }
+
+  function savePseudonym(slot, value) {
+    try {
+      if (value) localStorage.setItem(slot, JSON.stringify(value));
+      else localStorage.removeItem(slot);
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   function safeHref(value) {
@@ -153,6 +234,7 @@
   Widget.prototype.render = function (data) {
     var comments = Array.isArray(data.comments) ? data.comments : [];
     this.order = data.order === "newest" ? "newest" : "oldest";
+    this.pseudonyms = data.pseudonyms === true;
     this.root.textContent = "";
     if (this.t("heading")) {
       var heading = el("h" + this.level, "afterword-heading", this.t("heading") + " ");
@@ -205,6 +287,13 @@
     var meta = el("p", "afterword-meta");
     meta.appendChild(el("span", "afterword-author", c.author));
     meta.appendChild(document.createTextNode(" "));
+    // Only an explicit true counts: the server sets it when the comment was sent with the key.
+    var badge = c.verified === true ? this.badge(true) : this.pseudonyms ? this.badge(false) : null;
+    if (c.verified === true) item.classList.add("afterword-comment--verified");
+    if (badge) {
+      meta.appendChild(badge);
+      meta.appendChild(document.createTextNode(" "));
+    }
     var date = new Date(String(c.created));
     var time = el("time", "afterword-date");
     if (!isNaN(date.getTime())) {
@@ -228,6 +317,20 @@
     item.appendChild(meta);
     item.appendChild(this.body(c));
     return item;
+  };
+
+  Widget.prototype.badge = function (verified) {
+    var text = this.t(verified ? "verified" : "unverified");
+    if (!text) return null;
+    var badge = el("span", verified ? "afterword-verified" : "afterword-unverified", text);
+    var title = this.t(verified ? "verifiedTitle" : "unverifiedTitle");
+    if (title) badge.title = title;
+    return badge;
+  };
+
+  Widget.prototype.errorText = function (data) {
+    var key = data && data.error ? "error" + camel("_" + data.error) : "";
+    return (key && this.strings[key]) || (data && data.message) || this.t("errorGeneric");
   };
 
   Widget.prototype.body = function (c) {
@@ -280,6 +383,197 @@
     return row;
   };
 
+  // The pseudonym controls under the name field. Returns what the form needs:
+  // current() -> {name, key} or null, keyFor(name) -> key to send or null,
+  // and posted(data) after a successful submission.
+  Widget.prototype.pseudonymPart = function (nameRow, name) {
+    var self = this;
+    var n = this.n;
+    var current = loadPseudonym(STORE);
+    var claiming = null;
+    var keep = null;
+    var box = el("div", "afterword-pseudonym");
+
+    function t(key, values) { return fill(self.t(key), values); }
+
+    function notice(kind, text) {
+      var p = el("p", "afterword-notice afterword-notice--" + kind, text);
+      p.setAttribute("role", kind === "error" ? "alert" : "status");
+      return p;
+    }
+
+    function wrap(tag, className, children) {
+      var node = el(tag, className);
+      children.forEach(function (child) {
+        node.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
+      });
+      return node;
+    }
+
+    function drawHeld(message, showBackup) {
+      name.value = current.name;
+      var line = wrap("p", "afterword-posting-as", [t("postingAs") + " ",
+        el("strong", "afterword-pseudonym-name", current.name), " "]);
+      var badge = self.badge(true);
+      if (badge) line.appendChild(badge);
+      box.appendChild(line);
+      if (message) box.appendChild(notice("success", message));
+
+      var backup = el("details", "afterword-backup");
+      backup.appendChild(el("summary", null, t("backup")));
+      backup.appendChild(el("p", "afterword-backup-help", t("backupHelp", { name: current.name })));
+      var field = el("input", "afterword-input afterword-backup-key");
+      field.type = "text";
+      field.readOnly = true;
+      field.spellcheck = false;
+      field.autocomplete = "off";
+      field.value = formatKey(current.key);
+      backup.appendChild(self.field("backup", t("backup"), field));
+      var copy = el("button", "afterword-copy", t("copy"));
+      copy.type = "button";
+      var copied = el("span", "afterword-copied");
+      copied.setAttribute("role", "status");
+      copy.addEventListener("click", function () {
+        function done() { copied.textContent = " " + t("copied"); }
+        field.focus();
+        field.select();
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(field.value).then(done, function () { /* selected; copy by hand */ });
+        } else {
+          try { if (document.execCommand("copy")) done(); } catch (e) { /* selected; copy by hand */ }
+        }
+      });
+      var download = el("a", "afterword-download", t("download"));
+      download.href = "data:text/plain;charset=utf-8," + encodeURIComponent(
+        t("backupFile", { name: current.name, site: location.origin, key: formatKey(current.key) }));
+      download.setAttribute("download", "afterword-pseudonym.txt");
+      backup.appendChild(wrap("p", "afterword-backup-actions", [copy, " ", download, copied]));
+      backup.open = !!showBackup;
+      box.appendChild(backup);
+
+      var forget = el("button", "afterword-forget", t("forget"));
+      forget.type = "button";
+      forget.addEventListener("click", function () {
+        if (!window.confirm(t("forgetConfirm", { name: current.name }))) return;
+        savePseudonym(STORE, null);
+        current = null;
+        name.value = "";
+        draw();
+        name.focus();
+      });
+      box.appendChild(wrap("p", "afterword-pseudonym-actions", [forget]));
+    }
+
+    function drawFree() {
+      box.appendChild(el("p", "afterword-pseudonym-policy", t("namePolicy")));
+      if (!canMakeKeys()) return;
+      keep = el("input", "afterword-keep");
+      keep.type = "checkbox";
+      keep.name = "keep";
+      keep.id = "afterword-keep-" + n;
+      var label = el("label", "afterword-keep-label", t("keep"));
+      label.htmlFor = keep.id;
+      var help = el("p", "afterword-pseudonym-help", t("keepHelp"));
+      help.id = "afterword-keep-help-" + n;
+      help.hidden = true;
+      keep.setAttribute("aria-describedby", help.id);
+      keep.addEventListener("change", function () { help.hidden = !keep.checked; });
+      box.appendChild(wrap("p", "afterword-field afterword-field--keep", [keep, " ", label]));
+      box.appendChild(help);
+
+      var restore = el("details", "afterword-restore");
+      restore.appendChild(el("summary", null, t("restore")));
+      var input = el("input", "afterword-input");
+      input.type = "text";
+      input.name = "restore";
+      input.spellcheck = false;
+      input.autocomplete = "off";
+      restore.appendChild(self.field("restore", t("restoreKey"), input));
+      var button = el("button", "afterword-restore-button", t("restoreButton"));
+      button.type = "button";
+      restore.appendChild(wrap("p", "afterword-restore-actions", [button]));
+      var result = null;
+      function report(text) {
+        if (result) restore.removeChild(result);
+        result = restore.appendChild(notice("error", text));
+      }
+      function send() {
+        var key = parseKey(input.value);
+        input.removeAttribute("aria-invalid");
+        if (!key) {
+          input.setAttribute("aria-invalid", "true");
+          return report(t("errorPseudonymKeyInvalid"));
+        }
+        button.disabled = true;
+        fetch(self.api("api/v1/pseudonym"), {
+          method: "POST", credentials: "omit", mode: "cors",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ key: key })
+        }).then(function (resp) {
+          return resp.json().catch(function () { return {}; }).then(function (data) {
+            return { status: resp.status, data: data || {} };
+          });
+        }).then(function (reply) {
+          var held = reply.data.pseudonym;
+          if (reply.status === 200 && held && typeof held.name === "string" && held.name) {
+            current = { name: held.name, key: key };
+            var stored = savePseudonym(STORE, current);
+            savePseudonym(PENDING, null);
+            draw(t(stored ? "restored" : "keptNoStorage", { name: current.name }), !stored);
+          } else {
+            report(self.errorText(reply.data));
+          }
+        }).catch(function () {
+          report(t("errorNetwork"));
+        }).then(function () {
+          button.disabled = false;
+        });
+      }
+      button.addEventListener("click", send);
+      input.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+          event.preventDefault();   // do not send the comment form
+          send();
+        }
+      });
+      box.appendChild(restore);
+    }
+
+    function draw(message, showBackup) {
+      box.textContent = "";
+      keep = null;
+      nameRow.hidden = !!current;
+      box.className = "afterword-pseudonym" + (current ? " afterword-pseudonym--held" : "");
+      if (current) drawHeld(message, showBackup);
+      else drawFree();
+    }
+
+    draw();
+    return {
+      root: box,
+      current: function () { return current; },
+      keyFor: function (author) {
+        claiming = null;
+        if (current) return current.key;
+        if (!keep || !keep.checked) return null;
+        // Reuse the key of an unconfirmed claim for the same name: if that answer
+        // was lost on the way back, the server already holds the name for it.
+        var pending = loadPseudonym(PENDING);
+        claiming = { name: author, key: pending && pending.name === author ? pending.key : newKey() };
+        savePseudonym(PENDING, claiming);
+        return claiming.key;
+      },
+      posted: function (data) {
+        var held = data && data.pseudonym;
+        if (current || !claiming || !held || typeof held.name !== "string" || !held.name) return;
+        current = { name: held.name, key: claiming.key };
+        var stored = savePseudonym(STORE, current);
+        savePseudonym(PENDING, null);
+        draw(t(stored ? "kept" : "keptNoStorage", { name: current.name }), true);
+      }
+    };
+  };
+
   Widget.prototype.form = function (cfg) {
     var self = this;
     var form = el("form", "afterword-form");
@@ -294,7 +588,9 @@
     name.required = true;
     name.maxLength = cfg.maxName || 80;
     name.autocomplete = "name";
-    form.appendChild(this.field("name", this.t("name"), name));
+    var nameRow = form.appendChild(this.field("name", this.t("name"), name));
+    var pseudonym = this.pseudonyms ? this.pseudonymPart(nameRow, name) : null;
+    if (pseudonym) form.appendChild(pseudonym.root);
 
     var email = null;
     if (cfg.email) {
@@ -353,7 +649,7 @@
     if (this.remember) {
       try {
         var saved = JSON.parse(localStorage.getItem("afterword:identity") || "{}");
-        if (typeof saved.name === "string") name.value = saved.name;
+        if (typeof saved.name === "string" && !(pseudonym && pseudonym.current())) name.value = saved.name;
         if (email && typeof saved.email === "string") email.value = saved.email;
       } catch (e) { /* storage unavailable */ }
     }
@@ -374,7 +670,8 @@
       event.preventDefault();
       if (self.busy) return;
       [name, email, message].forEach(function (c) { if (c) c.removeAttribute("aria-invalid"); });
-      if (!name.value.trim()) return invalid(name, "errorNameRequired");
+      var held = pseudonym && pseudonym.current();
+      if (!held && !name.value.trim()) return invalid(name, "errorNameRequired");
       if (email && email.value.trim() && !email.checkValidity()) return invalid(email, "errorEmailInvalid");
       if (!message.value.trim()) return invalid(message, "errorBodyRequired");
 
@@ -385,12 +682,14 @@
       var payload = {
         thread: self.thread,
         page: location.origin + location.pathname,
-        author: name.value,
+        author: held ? held.name : name.value,
         email: email ? email.value : "",
         body: message.value,
         token: self.token,
         website: trapInput.value
       };
+      var key = pseudonym ? pseudonym.keyFor(payload.author) : null;
+      if (key) payload.key = key;
       fetch(self.api("api/v1/comments"), {
         method: "POST", credentials: "omit", mode: "cors",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -404,6 +703,7 @@
         if (data.token) self.token = data.token;
         if (result.status === 201 || result.status === 202) {
           message.value = "";
+          if (pseudonym) pseudonym.posted(data);
           if (self.remember) {
             try {
               localStorage.setItem("afterword:identity",
@@ -423,9 +723,8 @@
           }
           self.emit("posted", { thread: self.thread, status: data.status || "pending" });
         } else {
-          var key = data.error ? "error" + camel("_" + data.error) : "";
-          var text = (key && self.strings[key]) || data.message || self.t("errorGeneric");
-          show("error", text);
+          show("error", held && data.error === "pseudonym_taken"
+            ? fill(self.t("errorPseudonymLost"), { name: held.name }) : self.errorText(data));
           if (data.field === "author") name.setAttribute("aria-invalid", "true");
           if (data.field === "email" && email) email.setAttribute("aria-invalid", "true");
           if (data.field === "body") message.setAttribute("aria-invalid", "true");
@@ -448,7 +747,7 @@
     for (var i = 0; i < nodes.length; i++) new Widget(nodes[i]).start();
   }
 
-  window.Afterword = { init: init, version: "1.0.0" };
+  window.Afterword = { init: init, version: "1.1.0" };
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () { init(); });
   } else {

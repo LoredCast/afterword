@@ -8,7 +8,7 @@ import threading
 import time
 import traceback
 
-from . import admin, api, security
+from . import admin, api, pseudonyms, security
 from .db import Database
 from .laya import LayaClient
 from .laya_manager import LayaManager
@@ -114,6 +114,7 @@ class App:
             conn.execute("UPDATE comments SET ip_key = NULL WHERE ip_key IS NOT NULL AND created_at < ?",
                          (now - IP_KEY_RETENTION_DAYS * 86400,))
             conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
+            pseudonyms.forget_orphans(conn)
             conn.execute("DELETE FROM counters WHERE day < ?",
                          (time.strftime("%Y-%m-%d", time.gmtime(now - 90 * 86400)),))
         self.form_tokens.prune(now)

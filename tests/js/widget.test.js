@@ -14,10 +14,11 @@ function tick(ms = 0) {
 }
 
 function setup({ html, url = "https://blog.example.com/posts/hello/?utm=x#top",
-                 scriptSrc = "https://comments.example.com/widget.js", routes = {} } = {}) {
+                 scriptSrc = "https://comments.example.com/widget.js", routes = {}, storage = {} } = {}) {
   const dom = new JSDOM(`<!doctype html><html lang="en"><head></head><body>${html}</body></html>`,
                         { url, runScripts: "outside-only" });
   const { window } = dom;
+  for (const [key, value] of Object.entries(storage)) window.localStorage.setItem(key, JSON.stringify(value));
   const calls = [];
   window.fetch = async (input, init = {}) => {
     const u = new URL(input);
@@ -258,4 +259,235 @@ test("email field and hints follow server settings; loaded event fires", async (
   assert.match(document.querySelector(".afterword-hint").textContent, /Line breaks are kept/);
   assert.deepEqual({ ...detail }, { thread: "t1", count: 0 });
   assert.ok(window.Afterword && typeof window.Afterword.init === "function");
+});
+
+// -- pseudonyms -------------------------------------------------------------------
+
+const KEY = "abcdefghijklmnopqrstuvwxyz234567";
+const DASHED = "abcd-efgh-ijkl-mnop-qrst-uvwx-yz23-4567";
+const withPseudonyms = (comments = [], extra = {}) => thread(comments, Object.assign({ pseudonyms: true }, extra));
+const stored = (window, slot = "afterword:pseudonym") => JSON.parse(window.localStorage.getItem(slot) || "null");
+
+async function submit(window, form, fields = {}) {
+  for (const [name, value] of Object.entries(fields)) form.querySelector(`[name=${name}]`).value = value;
+  form.dispatchEvent(new window.Event("submit", { cancelable: true }));
+  await tick(10);
+}
+
+test("verified and unverified marks come only from the server's verified flag", async () => {
+  const comments = [
+    { id: "a1", author: "Mara", created: "2026-09-20T08:00:00Z", verified: true, body: [[{ t: "text", v: "Held" }]] },
+    { id: "b2", author: "Mara ✓ verified pseudonym", created: "2026-09-21T08:00:00Z", verified: false, body: [] },
+    { id: "c3", author: "Old", created: "2026-09-22T08:00:00Z", verified: "yes", body: [] },
+    { id: "d4", author: "Older", created: "2026-09-22T08:00:00Z", body: [] },
+  ];
+  const on = setup({ html: '<div data-afterword data-thread="t1"></div>',
+                     routes: { "GET /api/v1/thread": withPseudonyms(comments) } });
+  await tick(10);
+  const items = [...on.document.querySelectorAll(".afterword-comment")];
+  assert.equal(items[0].querySelector(".afterword-meta .afterword-verified").textContent, "✓ verified pseudonym");
+  assert.ok(items[0].classList.contains("afterword-comment--verified"));
+  assert.match(items[0].querySelector(".afterword-verified").title, /holder/);
+  for (const item of items.slice(1)) {
+    assert.equal(item.querySelector(".afterword-verified"), null);
+    assert.equal(item.querySelector(".afterword-unverified").textContent, "unverified");
+    assert.ok(!item.classList.contains("afterword-comment--verified"));
+  }
+
+  const off = setup({ html: '<div data-afterword data-thread="t1" data-text-unverified=""></div>',
+                      routes: { "GET /api/v1/thread": thread(comments) } });
+  await tick(10);
+  assert.equal(off.document.querySelectorAll(".afterword-verified").length, 1);   // still true for that comment
+  assert.equal(off.document.querySelectorAll(".afterword-unverified").length, 0);
+  assert.equal(off.document.querySelector(".afterword-pseudonym"), null);
+});
+
+test("keeping a name: key made in the browser, sent with the comment, backup offered", async () => {
+  let replies = 0;
+  const { window, document, calls } = setup({
+    html: '<div data-afterword data-thread="t1"></div>',
+    routes: {
+      "GET /api/v1/thread": withPseudonyms(),
+      "POST /api/v1/comments": (u, init) => ({ status: 202, json: {
+        status: "pending", token: "tok-" + (++replies + 1), pseudonym: { name: JSON.parse(init.body).author.trim() } } }),
+    },
+  });
+  await tick(10);
+  const form = document.querySelector("form");
+  const box = form.querySelector(".afterword-pseudonym");
+  assert.ok(box.compareDocumentPosition(form.querySelector(".afterword-field--name")) & window.Node.DOCUMENT_POSITION_PRECEDING);
+  assert.match(box.querySelector(".afterword-pseudonym-policy").textContent, /unverified/);
+  const keep = box.querySelector("input[type=checkbox][name=keep]");
+  assert.equal(box.querySelector(`label[for="${keep.id}"]`).textContent, "Keep this name as my pseudonym");
+  const help = box.querySelector(".afterword-pseudonym-help");
+  assert.ok(help.hidden);
+  keep.checked = true;
+  keep.dispatchEvent(new window.Event("change"));
+  assert.ok(!help.hidden);
+  assert.match(help.textContent, /No account, no email/);
+  assert.match(help.textContent, /publicly linked/);
+  assert.match(help.textContent, /network address/);
+  assert.match(help.textContent, /backup key/);
+
+  await submit(window, form, { author: " Mara ", body: "First!" });
+  const first = calls.filter((c) => c.init.method === "POST")[0].body;
+  assert.match(first.key, /^[a-z2-7]{32}$/);
+  assert.equal(first.author, " Mara ");
+  const held = stored(window);
+  assert.deepEqual(held, { name: "Mara", key: first.key });
+  assert.equal(stored(window, "afterword:pseudonym-pending"), null);
+
+  const nameRow = form.querySelector(".afterword-field--name");
+  assert.ok(nameRow.hidden);
+  const now = form.querySelector(".afterword-pseudonym--held");
+  assert.equal(now.querySelector(".afterword-posting-as").textContent, "Posting as Mara ✓ verified pseudonym");
+  assert.match(now.querySelector(".afterword-notice--success").textContent, /Save your backup key/);
+  const backup = now.querySelector("details.afterword-backup");
+  assert.ok(backup.open);
+  const dashed = first.key.match(/.{4}/g).join("-");
+  assert.equal(backup.querySelector("input.afterword-backup-key").value, dashed);
+  assert.ok(backup.querySelector("input.afterword-backup-key").readOnly);
+  const download = backup.querySelector("a.afterword-download");
+  assert.equal(download.getAttribute("download"), "afterword-pseudonym.txt");
+  assert.ok(decodeURIComponent(download.href).includes("Key:  " + dashed));
+  assert.ok(decodeURIComponent(download.href).includes("Site: https://blog.example.com"));
+
+  await submit(window, form, { body: "Second" });
+  const second = calls.filter((c) => c.init.method === "POST")[1].body;
+  assert.equal(second.key, first.key);
+  assert.equal(second.author, "Mara");
+  // Loading comments never carries the key.
+  for (const call of calls.filter((c) => c.init.method !== "POST")) {
+    assert.equal(call.body, null);
+    assert.ok(!call.url.href.includes(first.key));
+  }
+});
+
+test("a refused claim stores nothing; a retry for the same name reuses the key", async () => {
+  let reply = { status: 409, json: { error: "pseudonym_taken", message: "server", field: "author", token: "t2" } };
+  const { window, document, calls } = setup({
+    html: '<div data-afterword data-thread="t1"></div>',
+    routes: { "GET /api/v1/thread": withPseudonyms(), "POST /api/v1/comments": () => reply },
+  });
+  await tick(10);
+  const form = document.querySelector("form");
+  form.querySelector("[name=keep]").checked = true;
+  await submit(window, form, { author: "Mara", body: "Hi" });
+  assert.match(form.querySelector(".afterword-notice--error").textContent, /already someone’s pseudonym/);
+  assert.equal(form.querySelector("[name=author]").getAttribute("aria-invalid"), "true");
+  assert.equal(stored(window), null);
+  reply = { status: 202, json: { status: "pending", token: "t3", pseudonym: { name: "Mara" } } };
+  await submit(window, form, { author: "Mara", body: "Hi" });
+  const posts = calls.filter((c) => c.init.method === "POST").map((c) => c.body.key);
+  assert.equal(posts[0], posts[1]);
+  assert.equal(stored(window).key, posts[0]);
+
+  // Unticked: no key at all, and the server's naming-policy message is shown.
+  const plain = setup({
+    html: '<div data-afterword data-thread="t1"></div>',
+    routes: { "GET /api/v1/thread": withPseudonyms(),
+              "POST /api/v1/comments": () => ({ status: 409, json: { error: "name_reserved", field: "author" } }) },
+  });
+  await tick(10);
+  const plainForm = plain.document.querySelector("form");
+  await submit(plain.window, plainForm, { author: "Mara", body: "Hi" });
+  assert.equal("key" in plain.calls.find((c) => c.init.method === "POST").body, false);
+  assert.match(plainForm.querySelector(".afterword-notice").textContent, /restore your backup key/);
+});
+
+test("restoring from a pasted backup file", async () => {
+  let answer = { status: 404, json: { error: "pseudonym_unknown", message: "No." } };
+  const { window, document, calls } = setup({
+    html: '<div data-afterword data-thread="t1"></div>',
+    routes: { "GET /api/v1/thread": withPseudonyms(), "POST /api/v1/pseudonym": () => answer,
+              "POST /api/v1/comments": () => ({ status: 201, json: {} }) },
+  });
+  await tick(10);
+  const form = document.querySelector("form");
+  const restore = form.querySelector("details.afterword-restore");
+  assert.equal(restore.querySelector("summary").textContent, "Restore a pseudonym from a backup key");
+  const input = restore.querySelector("input[name=restore]");
+  const button = restore.querySelector("button.afterword-restore-button");
+  assert.equal(button.type, "button");
+
+  input.value = "not a key";
+  button.click();
+  await tick(10);
+  assert.equal(input.getAttribute("aria-invalid"), "true");
+  assert.equal(calls.filter((c) => c.url.pathname === "/api/v1/pseudonym").length, 0);
+
+  input.value = DASHED;
+  button.click();
+  await tick(10);
+  assert.equal(restore.querySelector(".afterword-notice--error").textContent, "No pseudonym on this site uses that key.");
+  assert.equal(stored(window), null);
+
+  answer = { status: 200, json: { pseudonym: { name: "Mara" } } };
+  input.value = `Afterword pseudonym backup\n\nName: Mara\nSite: https://blog.example.com\nKey:  ${DASHED.toUpperCase()}\n`;
+  input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+  await tick(10);
+  const lookups = calls.filter((c) => c.url.pathname === "/api/v1/pseudonym");
+  assert.deepEqual(lookups[lookups.length - 1].body, { key: KEY });
+  assert.equal(lookups[lookups.length - 1].init.credentials, "omit");
+  assert.equal(calls.filter((c) => c.url.pathname === "/api/v1/comments").length, 0);   // Enter did not post
+  assert.deepEqual(stored(window), { name: "Mara", key: KEY });
+  assert.match(form.querySelector(".afterword-posting-as").textContent, /Posting as Mara/);
+  assert.match(form.querySelector(".afterword-pseudonym .afterword-notice--success").textContent, /Welcome back/);
+});
+
+test("stop using a pseudonym on this device, after confirming", async () => {
+  const { window, document } = setup({
+    html: '<div data-afterword data-thread="t1"></div>',
+    storage: { "afterword:pseudonym": { name: "Mara", key: KEY } },
+    routes: { "GET /api/v1/thread": withPseudonyms() },
+  });
+  await tick(10);
+  const questions = [];
+  let answer = false;
+  window.confirm = (text) => { questions.push(text); return answer; };
+  const form = document.querySelector("form");
+  assert.ok(form.querySelector(".afterword-field--name").hidden);
+  assert.ok(!form.querySelector("details.afterword-backup").open);
+  form.querySelector("button.afterword-forget").click();
+  assert.match(questions[0], /Without your backup key you cannot post as Mara again/);
+  assert.deepEqual(stored(window), { name: "Mara", key: KEY });
+  answer = true;
+  form.querySelector("button.afterword-forget").click();
+  assert.equal(stored(window), null);
+  assert.ok(!form.querySelector(".afterword-field--name").hidden);
+  assert.equal(form.querySelector("[name=author]").value, "");
+  assert.ok(form.querySelector("[name=keep]"));
+});
+
+test("a held name that was released and taken by someone else is explained", async () => {
+  const { window, document, calls } = setup({
+    html: '<div data-afterword data-thread="t1" data-remember="true"></div>',
+    storage: { "afterword:pseudonym": { name: "Mara", key: KEY }, "afterword:identity": { name: "Ada" } },
+    routes: { "GET /api/v1/thread": withPseudonyms(),
+              "POST /api/v1/comments": () => ({ status: 409, json: { error: "pseudonym_taken", field: "author" } }) },
+  });
+  await tick(10);
+  const form = document.querySelector("form");
+  await submit(window, form, { body: "Hello again" });
+  const post = calls.find((c) => c.init.method === "POST").body;
+  assert.equal(post.author, "Mara");                  // the held name wins over a remembered one
+  assert.equal(post.key, KEY);
+  assert.match(form.querySelector(".afterword-notice--error").textContent, /^Mara is no longer held by your key/);
+});
+
+test("with pseudonyms off, a stored key is never sent", async () => {
+  const { window, document, calls } = setup({
+    html: '<div data-afterword data-thread="t1" data-remember="true"></div>',
+    storage: { "afterword:pseudonym": { name: "Mara", key: KEY }, "afterword:identity": { name: "Ada" } },
+    routes: { "GET /api/v1/thread": thread([]), "POST /api/v1/comments": () => ({ status: 202, json: { status: "pending" } }) },
+  });
+  await tick(10);
+  const form = document.querySelector("form");
+  assert.equal(form.querySelector(".afterword-pseudonym"), null);
+  assert.equal(form.querySelector("[name=author]").value, "Ada");
+  await submit(window, form, { body: "Hi" });
+  const post = calls.find((c) => c.init.method === "POST").body;
+  assert.equal(post.author, "Ada");
+  assert.equal("key" in post, false);
+  assert.deepEqual(stored(window), { name: "Mara", key: KEY });   // kept for when they come back on
 });

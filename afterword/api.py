@@ -1,11 +1,12 @@
 """Public JSON API used by the widget.
 
 GET  /api/v1/thread?id=<thread>   approved comments + a fresh form token
-POST /api/v1/comments             submit a comment
+POST /api/v1/comments             submit a comment (optionally with a pseudonym key)
+POST /api/v1/pseudonym            which pseudonym a backup key belongs to
 
 Only approved comments are ever returned, and only these fields: id, author,
-created, text and body. Email addresses, network keys, moderation reasons and
-Laya scores never leave the dashboard.
+created, verified, text and body. Email addresses, network keys, pseudonym key
+hashes, moderation reasons and Laya scores never leave the dashboard.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ import unicodedata
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
-from . import moderation, security
+from . import moderation, pseudonyms, security
 from . import text as textmod
 from .settings import normalize_origin
 from .web import HTTPError, Request, Response, json_response
@@ -26,6 +27,8 @@ MAX_EMAIL = 254
 MAX_THREAD = 300
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_THREAD_COMMENTS = 1000
+RESTORE_LIMIT = 10          # backup-key lookups per sender per 10 minutes
+PUBLIC_COLUMNS = "public_id, author, body, created_at, pseudonym_id"
 _EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s.]{2,}$")
 
 
@@ -50,6 +53,8 @@ def public_comment(row, settings: dict) -> dict:
         "id": row["public_id"],
         "author": row["author"],
         "created": iso(row["created_at"]),
+        # Posted with the pseudonym's key. Never true for comments from before pseudonyms.
+        "verified": row["pseudonym_id"] is not None,
         "text": row["body"],
         "body": textmod.render(row["body"], formatting=settings["formatting"],
                                linkify=settings["linkify"]),
@@ -84,7 +89,7 @@ def _error(status: int, code: str, message: str, headers: dict, field: str | Non
 
 def handle(app, req: Request) -> Response | None:
     path = req.path
-    if path not in ("/api/v1/thread", "/api/v1/comments"):
+    if path not in ("/api/v1/thread", "/api/v1/comments", "/api/v1/pseudonym"):
         return None
     settings = app.settings.all()
     headers = _cors(req, settings)
@@ -104,6 +109,8 @@ def handle(app, req: Request) -> Response | None:
             return get_thread(app, req, settings, headers)
         if path == "/api/v1/comments" and req.method == "POST":
             return post_comment(app, req, settings, headers)
+        if path == "/api/v1/pseudonym" and req.method == "POST":
+            return restore_pseudonym(app, req, settings, headers)
     except HTTPError as exc:
         return _error(exc.status, exc.code, exc.message, headers, extra_headers=exc.headers)
     return _error(405, "method_not_allowed", "Method not allowed.", headers,
@@ -127,7 +134,7 @@ def get_thread(app, req: Request, settings: dict, headers: dict) -> Response:
         return _error(400, "invalid_thread", "Missing or invalid thread id.", headers)
     order = "ASC" if settings["thread_order"] == "oldest" else "DESC"
     rows = app.db.conn().execute(
-        f"SELECT public_id, author, body, created_at FROM comments "
+        f"SELECT {PUBLIC_COLUMNS} FROM comments "
         f"WHERE thread = ? AND status = 'approved' ORDER BY created_at {order}, id {order} LIMIT ?",
         (thread, MAX_THREAD_COMMENTS),
     ).fetchall()
@@ -135,6 +142,7 @@ def get_thread(app, req: Request, settings: dict, headers: dict) -> Response:
         "thread": thread,
         "open": settings["comments_open"],
         "order": settings["thread_order"],
+        "pseudonyms": settings["pseudonyms"],
         "count": len(rows),
         "comments": [public_comment(r, settings) for r in rows],
         "form": form_config(app, thread, settings) if settings["comments_open"] else None,
@@ -169,6 +177,15 @@ def post_comment(app, req: Request, settings: dict, headers: dict) -> Response:
     if len(author) > MAX_NAME:
         return _error(400, "name_too_long", f"Please keep your name under {MAX_NAME} characters.",
                       headers, "author")
+    if settings["pseudonyms"] and pseudonyms.has_check_mark(author):
+        return _error(400, "name_check_mark",
+                      "Please leave check marks out of your name; they mark verified pseudonyms.",
+                      headers, "author")
+    raw_key = data.get("key")
+    if raw_key not in (None, "") and not settings["pseudonyms"]:
+        return _error(403, "pseudonyms_off",
+                      "Pseudonyms are turned off on this site. Reload the page to post without one.",
+                      headers)
 
     email = None
     if settings["ask_email"]:
@@ -201,6 +218,14 @@ def post_comment(app, req: Request, settings: dict, headers: dict) -> Response:
         return _error(429, "rate_limited", "Too many comments in a short time. Please try again later.",
                       headers, extra_headers={"Retry-After": str(int(wait) + 1)})
 
+    conn = app.db.conn()
+    claim = None
+    if settings["pseudonyms"]:
+        try:
+            claim = pseudonyms.resolve(conn, app.secret, author, raw_key)
+        except pseudonyms.Problem as exc:
+            return _error(exc.status, exc.code, exc.message, headers, exc.field)
+
     page_url = None
     raw_page = data.get("page")
     if isinstance(raw_page, str) and len(raw_page) <= 2000:
@@ -209,7 +234,6 @@ def post_comment(app, req: Request, settings: dict, headers: dict) -> Response:
                 f"{parts.scheme}://{parts.netloc}") == normalize_origin(req.header("Origin") or ""):
             page_url = raw_page
 
-    conn = app.db.conn()
     flags = moderation.basic_flags(settings, conn, author, body, email, now)
     use_laya = moderation.wants_laya(settings)
     pid = security.public_id()
@@ -221,12 +245,16 @@ def post_comment(app, req: Request, settings: dict, headers: dict) -> Response:
 
     if use_laya:
         # Store first, then ask Laya: a crash or hang cannot lose the comment.
-        with conn:
-            conn.execute(
-                "INSERT INTO comments (public_id, thread, page_url, author, email, body, body_hash, "
-                "status, reason, flags, created_at, ip_key) VALUES (:public_id, :thread, :page_url, "
-                ":author, :email, :body, :body_hash, 'pending', 'Received; waiting for Laya.', "
-                ":flags, :created_at, :ip_key)", row)
+        try:
+            with conn:
+                row["pseudonym_id"] = pseudonyms.attach(conn, claim, int(now))
+                conn.execute(
+                    "INSERT INTO comments (public_id, thread, page_url, author, email, body, body_hash, "
+                    "status, reason, flags, created_at, ip_key, pseudonym_id) VALUES (:public_id, "
+                    ":thread, :page_url, :author, :email, :body, :body_hash, 'pending', "
+                    "'Received; waiting for Laya.', :flags, :created_at, :ip_key, :pseudonym_id)", row)
+        except pseudonyms.Problem as exc:
+            return _error(exc.status, exc.code, exc.message, headers, exc.field)
         if settings["laya_enabled"]:
             result = app.laya.score(settings, author, body)
         else:
@@ -248,12 +276,17 @@ def post_comment(app, req: Request, settings: dict, headers: dict) -> Response:
         decision = moderation.decide(settings, flags, None)
         row.update(status=decision.status, reason=decision.reason, decided_by=decision.decided_by,
                    decided_at=int(now) if decision.decided_by else None)
-        with conn:
-            conn.execute(
-                "INSERT INTO comments (public_id, thread, page_url, author, email, body, body_hash, "
-                "status, reason, decided_by, decided_at, flags, created_at, ip_key) VALUES "
-                "(:public_id, :thread, :page_url, :author, :email, :body, :body_hash, :status, "
-                ":reason, :decided_by, :decided_at, :flags, :created_at, :ip_key)", row)
+        try:
+            with conn:
+                row["pseudonym_id"] = pseudonyms.attach(conn, claim, int(now))
+                conn.execute(
+                    "INSERT INTO comments (public_id, thread, page_url, author, email, body, body_hash, "
+                    "status, reason, decided_by, decided_at, flags, created_at, ip_key, pseudonym_id) "
+                    "VALUES (:public_id, :thread, :page_url, :author, :email, :body, :body_hash, "
+                    ":status, :reason, :decided_by, :decided_at, :flags, :created_at, :ip_key, "
+                    ":pseudonym_id)", row)
+        except pseudonyms.Problem as exc:
+            return _error(exc.status, exc.code, exc.message, headers, exc.field)
 
     app.form_tokens.consume(token, now)
     app.limiter.hit("ip:" + ipk, settings["rate_per_ip"], 600, now)
@@ -262,10 +295,38 @@ def post_comment(app, req: Request, settings: dict, headers: dict) -> Response:
     app.db.bump({"approved": "published", "pending": "held", "rejected": "rejected_auto"}[decision.status])
 
     next_token = app.form_tokens.issue(thread)
+    extra = {"pseudonym": {"name": claim.name}} if claim else {}
     if decision.status == "approved":
-        saved = conn.execute("SELECT public_id, author, body, created_at FROM comments "
-                             "WHERE public_id = ?", (pid,)).fetchone()
+        saved = conn.execute(f"SELECT {PUBLIC_COLUMNS} FROM comments WHERE public_id = ?",
+                             (pid,)).fetchone()
         return json_response({"status": "published", "comment": public_comment(saved, settings),
-                              "token": next_token}, status=201, headers=headers)
+                              "token": next_token, **extra}, status=201, headers=headers)
     # Rejected comments get the same answer as pending ones: spammers learn nothing.
-    return json_response({"status": "pending", "token": next_token}, status=202, headers=headers)
+    return json_response({"status": "pending", "token": next_token, **extra}, status=202,
+                         headers=headers)
+
+
+def restore_pseudonym(app, req: Request, settings: dict, headers: dict) -> Response:
+    """Tell a reader restoring a backup key which name it holds. Nothing is stored."""
+    if "Access-Control-Allow-Origin" not in headers:
+        app.db.bump("origin_blocked")
+        return _error(403, "origin_not_allowed",
+                      "This site is not allowed to post comments here.", headers)
+    data = req.json(4096)
+    if not isinstance(data, dict):
+        return _error(400, "invalid_json", "Expected a JSON object.", headers)
+    if not settings["pseudonyms"]:
+        return _error(403, "pseudonyms_off", "Pseudonyms are turned off on this site.", headers)
+    wait = app.limiter.hit("restore:" + security.ip_key(app.secret, req.remote_addr),
+                           RESTORE_LIMIT, 600)
+    if wait:
+        return _error(429, "rate_limited", "Too many attempts in a short time. Please try again later.",
+                      headers, extra_headers={"Retry-After": str(int(wait) + 1)})
+    if pseudonyms.normalize_key(data.get("key")) is None:
+        return _error(400, "pseudonym_key_invalid", "That backup key does not look right.", headers)
+    row = pseudonyms.lookup(app.db.conn(), app.secret, data.get("key"))
+    if row is None:
+        return _error(404, "pseudonym_unknown",
+                      "No pseudonym on this site uses that key. It may have been released, "
+                      "or it may belong to another site.", headers)
+    return json_response({"pseudonym": {"name": row["name"]}}, headers=headers)

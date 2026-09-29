@@ -97,8 +97,13 @@ def flash(app, session, kind: str, message: str) -> None:
 # ---------------------------------------------------------------------------
 
 NAV = [("comments", "/admin/comments", "Comments"), ("settings", "/admin/settings", "Settings"),
-       ("laya", "/admin/laya", "Laya"), ("embed", "/admin/embed", "Add to your blog"),
-       ("account", "/admin/account", "Account")]
+       ("pseudonyms", "/admin/pseudonyms", "Pseudonyms"), ("laya", "/admin/laya", "Laya"),
+       ("embed", "/admin/embed", "Add to your blog"), ("account", "/admin/account", "Account")]
+
+
+def _pseudonyms_in_use(app) -> bool:
+    return app.settings.get("pseudonyms") or app.db.conn().execute(
+        "SELECT EXISTS (SELECT 1 FROM pseudonyms)").fetchone()[0] == 1
 
 
 def page(app, req: Request, title: str, body: Markup, *, session=None, current: str = "",
@@ -108,7 +113,10 @@ def page(app, req: Request, title: str, body: Markup, *, session=None, current: 
         pending = app.db.conn().execute(
             "SELECT COUNT(*) FROM comments WHERE status = 'pending'").fetchone()[0]
         links = []
+        show_pseudonyms = current == "pseudonyms" or _pseudonyms_in_use(app)
         for key, path, label in NAV:
+            if key == "pseudonyms" and not show_pseudonyms:
+                continue
             count = render(' <span class="count">{n}</span>', n=pending) if key == "comments" and pending else ""
             links.append(render('<a href="{href}"{cur}>{label}{count}</a>', href=req.url(path),
                                 label=label, count=count,
@@ -290,6 +298,7 @@ def handle(app, req: Request) -> Response | None:
         "/admin/logout": lambda: logout(app, req, session),
         "/admin/comments": lambda: comments_page(app, req, session),
         "/admin/settings": lambda: settings_page(app, req, session),
+        "/admin/pseudonyms": lambda: pseudonyms_page(app, req, session),
         "/admin/laya": lambda: laya_page(app, req, session),
         "/admin/laya/service": lambda: laya_service(app, req, session),
         "/admin/laya/test": lambda: laya_page(app, req, session, test=True),
@@ -415,7 +424,7 @@ def logout(app, req: Request, session) -> Response:
 # comments
 # ---------------------------------------------------------------------------
 
-FILTER_KEYS = ("status", "thread", "q", "sort", "sender", "page")
+FILTER_KEYS = ("status", "thread", "q", "sort", "sender", "pseudonym", "page")
 
 
 def _list_url(req: Request, **params) -> str:
@@ -435,8 +444,11 @@ def _current_filters(req: Request, source=None) -> dict:
         page_no = max(1, min(10_000, int(get("page") or 1)))
     except ValueError:
         page_no = 1
+    pseudonym = get("pseudonym")[:12]
     return {"status": status, "thread": get("thread")[:300], "q": get("q")[:200],
-            "sort": sort, "sender": get("sender")[:16], "page": page_no}
+            "sort": sort, "sender": get("sender")[:16],
+            "pseudonym": pseudonym if pseudonym.isascii() and pseudonym.isdigit() else "",
+            "page": page_no}
 
 
 def comments_page(app, req: Request, session) -> Response:
@@ -455,6 +467,9 @@ def comments_page(app, req: Request, session) -> Response:
     if f["sender"]:
         where.append("ip_key = ?")
         params.append(f["sender"])
+    if f["pseudonym"]:
+        where.append("pseudonym_id = ?")
+        params.append(int(f["pseudonym"]))
     if f["q"]:
         like = "%" + f["q"].replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         where.append("(body LIKE ? ESCAPE '\\' OR author LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\')")
@@ -481,7 +496,7 @@ def comments_page(app, req: Request, session) -> Response:
         empty = {"pending": "Nothing is waiting for review.",
                  "approved": "No published comments yet.",
                  "rejected": "Nothing has been rejected."}.get(f["status"], "No comments match.")
-        if f["thread"] or f["q"] or f["sender"]:
+        if f["thread"] or f["q"] or f["sender"] or f["pseudonym"]:
             empty = "No comments match these filters."
         items = [render('<li class="empty">{t}</li>', t=empty)]
 
@@ -490,6 +505,10 @@ def comments_page(app, req: Request, session) -> Response:
         filters_note.append(render('post <code>{t}</code>', t=f["thread"]))
     if f["sender"]:
         filters_note.append(render('sender <code>{t}</code>', t=f["sender"]))
+    if f["pseudonym"]:
+        held = conn.execute("SELECT name FROM pseudonyms WHERE id = ?", (int(f["pseudonym"]),)).fetchone()
+        filters_note.append(render('pseudonym <strong>{n}</strong>', n=held[0]) if held
+                            else Markup("a pseudonym that has been released"))
     clear = render(' <a href="{h}">Show everything</a>', h=_list_url(req, status=f["status"])) \
         if filters_note else ""
 
@@ -591,13 +610,17 @@ def _comment_item(req: Request, row, s: dict, now: float) -> Markup:
     sender = render(' <a class="sender" href="{h}" title="All comments from the same network">sender {k}</a>',
                     h=_list_url(req, status="all", sender=row["ip_key"]), k=row["ip_key"][:6]) \
         if row["ip_key"] else ""
+    pseudonym = render(' <a class="tag tag-pseudonym" href="{h}" title="Posted with this pseudonym’s key. '
+                       'All comments from the same holder">✓ pseudonym</a>',
+                       h=_list_url(req, status="all", pseudonym=str(row["pseudonym_id"]))) \
+        if row["pseudonym_id"] is not None else ""
     likely = row["laya_status"] == "scored" and row["laya_score"] is not None \
         and row["laya_score"] >= s["laya_flag_at"]
     return render(
         """<li class="comment status-{status}{likely}" id="c-{pid}">
 <input type="checkbox" name="id" value="{pid}" id="sel-{pid}" class="select" aria-label="Select comment by {author}">
 <div class="comment-main">
-<p class="comment-head"><strong class="author">{author}</strong>{email}
+<p class="comment-head"><strong class="author">{author}</strong>{pseudonym}{email}
 <span class="when" title="{full}">{when}</span></p>
 <p class="comment-where">On {thread}{page_link}{sender}</p>
 <div class="comment-text">{body}</div>
@@ -609,7 +632,7 @@ def _comment_item(req: Request, row, s: dict, now: float) -> Markup:
 </div>
 </li>""",
         status=row["status"], likely=" is-likely-spam" if likely else "", pid=pid,
-        author=row["author"],
+        author=row["author"], pseudonym=pseudonym,
         email=render(' <span class="email">{e}</span>', e=row["email"]) if row["email"] else "",
         full=iso(row["created_at"]).replace("T", " ").replace("Z", " UTC"),
         when=ago(row["created_at"], now), thread=thread_link, page_link=page_link, sender=sender,
@@ -684,7 +707,7 @@ def comment_action(app, req: Request, session) -> Response:
 # ---------------------------------------------------------------------------
 
 SETTINGS_KEYS = ["site_origins", "comments_open", "moderation_mode", "automatic_decider",
-                 "formatting", "linkify", "ask_email", "thread_order", "max_body_chars",
+                 "formatting", "linkify", "ask_email", "pseudonyms", "thread_order", "max_body_chars",
                  "min_seconds", "max_links", "hold_duplicates", "blocked_terms", "rate_per_ip",
                  "rate_global", "purge_rejected_days"]
 
@@ -722,7 +745,9 @@ def settings_page(app, req: Request, session) -> Response:
 <p class="help">Laya’s thresholds and what happens when it cannot answer are on the <a href="{laya}">Laya page</a>.</p></div>
 </section>
 <section class="panel"><h2>The comment form</h2>
-{formatting}{linkify}{email}{order}{maxbody}
+{formatting}{linkify}{email}{pseudonyms}
+<p class="help sub">Readers never need an account, an email address or another site’s login for this. <a href="{pseudonyms_page}">About pseudonyms, and the names held so far</a>.</p>
+{order}{maxbody}
 </section>
 <section class="panel"><h2>Spam protection</h2>
 <p class="help">These checks run before any moderation mode. Comments that fail the first three are refused with a message to the reader; the others hold a comment for review in automatic mode and are shown as notes in the queue.</p>
@@ -740,6 +765,12 @@ def settings_page(app, req: Request, session) -> Response:
         errors=Markup('<p class="flash flash-error" role="alert">Some settings need attention; '
                       'see the notes below.</p>') if errors else "",
         csrf=csrf_field(session), laya=req.url("/admin/laya"),
+        pseudonyms_page=req.url("/admin/pseudonyms"),
+        pseudonyms=form.checkbox("pseudonyms", "Let readers keep a name as a verified pseudonym",
+                                 "A reader can tick a box to keep their name. Their browser holds a secret "
+                                 "key, and only comments sent with it show the name with “✓ verified "
+                                 "pseudonym”. Nobody else can post under that name or a look-alike; all "
+                                 "other names are marked “unverified”. Older comments are never marked."),
         origins=form.textarea("site_origins", "Blog address",
                               "The address of the blog that shows the comments, for example "
                               "https://blog.example.com. One per line if you have several. Only these "
@@ -786,6 +817,62 @@ def settings_page(app, req: Request, session) -> Response:
                           help_text="0 keeps them until you delete them."),
     )
     return page(app, req, "Settings", body, session=session, current="settings")
+
+
+# ---------------------------------------------------------------------------
+# pseudonyms
+# ---------------------------------------------------------------------------
+
+def pseudonyms_page(app, req: Request, session) -> Response:
+    conn = app.db.conn()
+    if req.method == "POST":
+        raw = req.field("release")
+        held = conn.execute("SELECT id, name FROM pseudonyms WHERE id = ?", (int(raw),)).fetchone() \
+            if raw.isascii() and raw.isdigit() and len(raw) <= 12 else None
+        if held is None:
+            flash(app, session, "info", "That pseudonym had already been released.")
+        else:
+            with conn:
+                conn.execute("DELETE FROM pseudonyms WHERE id = ?", (held["id"],))
+            flash(app, session, "ok", f"Released “{held['name']}”. Its comments are no longer marked as "
+                                      "verified, and anyone can now use or claim the name.")
+        return redirect(req.url("/admin/pseudonyms"))
+    rows = conn.execute(
+        "SELECT p.id, p.name, p.created_at, SUM(c.status = 'approved') AS published, "
+        "SUM(c.status = 'pending') AS pending, SUM(c.status = 'rejected') AS rejected, "
+        "MAX(c.created_at) AS last FROM pseudonyms p LEFT JOIN comments c ON c.pseudonym_id = p.id "
+        "GROUP BY p.id ORDER BY p.name COLLATE NOCASE, p.id LIMIT 1000").fetchall()
+    now = time.time()
+    table_rows = [render(
+        """<tr><th scope="row"><a href="{list}">{name}</a></th><td>{since}</td><td>{published}</td>
+<td>{pending}</td><td>{rejected}</td><td>{last}</td>
+<td><form method="post">{csrf}<button type="submit" name="release" value="{id}" class="danger" data-confirm="{confirm}">Release</button></form></td></tr>""",
+        list=_list_url(req, status="all", pseudonym=str(r["id"])), name=r["name"],
+        since=ago(r["created_at"], now), published=r["published"] or 0, pending=r["pending"] or 0,
+        rejected=r["rejected"] or 0, last=ago(r["last"], now), csrf=csrf_field(session), id=r["id"],
+        confirm=f"Release “{r['name']}”? Its comments will no longer be marked as verified, and anyone "
+                "can then use or claim the name.") for r in rows]
+    table = render(
+        """<table class="pseudonyms"><thead><tr><th>Name</th><th>Held since</th><th>Published</th>
+<th>Pending</th><th>Rejected</th><th>Last comment</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+<tbody>{rows}</tbody></table>""", rows=join(table_rows)) if table_rows else \
+        Markup('<p class="muted">No reader has kept a pseudonym yet.</p>')
+    off = Markup("") if app.settings.get("pseudonyms") else render(
+        '<p class="flash flash-info">Pseudonyms are off. Readers cannot keep new ones, and while it stays '
+        'off the names below are not reserved: anyone can post under them, without the mark. '
+        '<a href="{h}">Turn them on in Settings</a>.</p>', h=req.url("/admin/settings"))
+    body = render(
+        """<h1>Pseudonyms</h1>
+{off}
+<section class="panel"><h2>How they work</h2>
+<p>A reader who ticks “Keep this name as my pseudonym” gets a secret key in their browser. Afterword stores only a keyed hash of it, together with the name. Comments sent with the key show the name with “✓ verified pseudonym”. Nobody else can post under that name, or one that looks like it; every other name is shown as “unverified”. Readers can save the key and restore it on another device. Comments written before a name was claimed are never marked.</p>
+<p>“Verified” means only that the comment was sent with the same key. Afterword does not know who holds it. A pseudonym links its comments to each other in public, and it hides nothing from this server: requests are handled exactly like any other comment.</p>
+<p>A name stays held while at least one of its comments is kept here, rejected ones included, until they are deleted. Release a name that spam has taken, or whose holder lost their key and asked you to. Its comments are then shown as unverified and anyone can claim the name. You cannot tell a holder who lost their key from someone pretending to be them.</p>
+</section>
+<section class="panel"><h2>Names held <span class="count">{n}</span></h2>
+{table}
+</section>""", off=off, n=len(rows), table=table)
+    return page(app, req, "Pseudonyms", body, session=session, current="pseudonyms")
 
 
 # ---------------------------------------------------------------------------
