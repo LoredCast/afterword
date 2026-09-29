@@ -239,7 +239,7 @@ install it the same way and restart. The database needs no change.
 | | |
 |---|---|
 | **Replies** | Every comment gets a quiet **Reply** link. Replies are shown one level deep under their comment; a reply to a reply joins the same conversation and starts with “@name · date”, linked to the comment it answers. Replies are moderated like any comment. **On by default**; turn off under **Settings → The comment form → Let readers reply to comments**. |
-| **Collapsed form** | Only the comments are open. The form waits behind a **Write a comment** button (or opens with **Reply**). To keep the old always-open form, add `data-form="open"` to the `data-afterword` element on your blog. |
+| **Collapsed form** | Only the comments are open. The form waits behind a **Write a comment** link (or opens with **Reply**). Only **Post comment** is a button; every other control is a link, so it takes your theme’s link style. To keep the old always-open form, add `data-form="open"` to the `data-afterword` element on your blog. |
 | **"verified" as text** | Pseudonym comments now show a plain **verified** next to the name, instead of a boxed “✓ verified pseudonym”. While pseudonyms are on, names containing the word “verified” are refused, like check marks, so no name can imitate the mark. |
 | **Database** | Schema 2 → 3: adds `parent_id`, `reply_to`, `reply_to_author` and `reply_to_created` columns to `comments`. Existing comments stay top-level. |
 | **`widget.js`, `afterword.css`** | Changed: update a pinned SRI hash (step 5), and copy the new CSS rules if you copied the file. |
