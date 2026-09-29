@@ -78,6 +78,17 @@ MIGRATIONS = [
         REFERENCES pseudonyms (id) ON DELETE SET NULL;   -- set only when posted with the key
     CREATE INDEX comments_pseudonym ON comments (pseudonym_id);
     """,
+    # 3: replies, one level deep. parent_id is the top-level comment a reply is
+    # shown under; reply_to* name the comment it answers (a copy, so the
+    # "@name, date" reference survives if that comment is later removed).
+    """
+    ALTER TABLE comments ADD COLUMN parent_id INTEGER
+        REFERENCES comments (id) ON DELETE SET NULL;
+    ALTER TABLE comments ADD COLUMN reply_to TEXT;             -- public_id of the comment answered
+    ALTER TABLE comments ADD COLUMN reply_to_author TEXT;
+    ALTER TABLE comments ADD COLUMN reply_to_created INTEGER;
+    CREATE INDEX comments_parent ON comments (parent_id);
+    """,
 ]
 
 

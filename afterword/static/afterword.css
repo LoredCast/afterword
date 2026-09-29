@@ -53,14 +53,60 @@
   white-space: nowrap;
 }
 
-.afterword-verified {
-  padding: 0 0.45em;
-  border: 1px solid currentColor;
-  border-radius: 1em;
-}
-
 .afterword-unverified {
   opacity: 0.6;
+}
+
+.afterword-replies {
+  list-style: none;
+  margin: 0.75em 0 0;
+  padding: 0 0 0 1.25em;
+  border-left: 2px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+
+.afterword-comment--reply {
+  padding: 0.5em 0;
+  border-top: 0;
+}
+
+.afterword-reply-to {
+  margin: 0 0 0.3em;
+  font-size: 0.85em;
+  opacity: 0.75;
+}
+
+.afterword-reply-ref,
+.afterword-reply-ref:visited {
+  color: inherit;
+}
+
+.afterword-comment-actions {
+  margin: 0.4em 0 0;
+}
+
+/* Reply and cancel look like quiet links, not like the blog's main buttons. */
+.afterword-reply-button,
+.afterword-cancel-reply {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85em;
+  text-decoration: underline;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.afterword-reply-button:hover,
+.afterword-reply-button:focus-visible,
+.afterword-cancel-reply:hover,
+.afterword-cancel-reply:focus-visible {
+  opacity: 1;
+}
+
+.afterword-replying {
+  margin: 0 0 1em;
 }
 
 .afterword-permalink,

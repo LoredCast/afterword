@@ -28,7 +28,7 @@ import unicodedata
 # 32 characters of RFC 4648 base32 (a-z, 2-7): 160 random bits from the browser.
 _KEY = re.compile(r"[a-z2-7]{32}")
 
-# Readers could otherwise imitate the badge with a check mark in their name.
+# Readers could otherwise imitate the "verified" mark in their name ("Mara verified", "Mara ✓").
 CHECK_MARKS = frozenset("✓✔☑✅√\U0001f5f8\U0001f5f9")
 
 # Letters that look like other letters once case is folded. Mapping too much is
@@ -46,6 +46,9 @@ _LOOKALIKE = str.maketrans({
     # "i" joins "l" because a capital I and a small l look the same in many fonts.
     "ı": "l", "i": "l", "1": "l", "ǀ": "l", "ł": "l", "ø": "o", "0": "o", "đ": "d", "ħ": "h",
 })
+
+
+_MARK_WORD = "verlfled"          # name_key("verified"), so look-alike spellings count too
 
 
 class Problem(Exception):
@@ -84,8 +87,9 @@ def name_key(name: str) -> str:
     return text.replace("rn", "m").replace("vv", "w")
 
 
-def has_check_mark(name: str) -> bool:
-    return any(ch in CHECK_MARKS for ch in name)
+def imitates_mark(name: str) -> bool:
+    """True for names that could pass for the "verified" mark shown next to them."""
+    return any(ch in CHECK_MARKS for ch in name) or _MARK_WORD in name_key(name)
 
 
 def _taken(conn, key: str) -> bool:

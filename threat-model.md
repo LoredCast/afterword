@@ -101,13 +101,19 @@ Each safeguard names the test that checks it (`tests/…`).
 See [docs/pseudonyms.md](docs/pseudonyms.md) for the full description.
 
 - A pseudonym is bound to a random 160-bit key made in the reader's browser with `crypto.getRandomValues`. The server stores only `HMAC-SHA-256(server secret, key)`, never the key; a leaked database or backup does not let anyone post as a pseudonym, and hashes cannot be matched across servers. *test_key_is_never_stored_or_returned, test_key_hash_depends_on_server_secret*
-- Only a request carrying the key gets the ✓ mark; a key only works with its own name, and a different key cannot claim a held name. *test_other_readers_cannot_post_as_the_pseudonym, test_key_only_works_with_its_own_name*
-- While the feature is on, a name that looks like a held one (compatibility forms, case, accents, spaces, punctuation, symbols and emoji, common Cyrillic/Greek look-alikes, `0`/`o`, `1`/`l`/`I`, `rn`/`m`) is refused, with or without a key, and check marks are refused in every name so no name can imitate the mark. Every other comment carries an "unverified" mark. *test_lookalikes_share_a_key, test_invalid_keys_and_names*
+- Only a request carrying the key gets the “verified” mark; a key only works with its own name, and a different key cannot claim a held name. *test_other_readers_cannot_post_as_the_pseudonym, test_key_only_works_with_its_own_name*
+- While the feature is on, a name that looks like a held one (compatibility forms, case, accents, spaces, punctuation, symbols and emoji, common Cyrillic/Greek look-alikes, `0`/`o`, `1`/`l`/`I`, `rn`/`m`) is refused, with or without a key, and names containing check marks or the word “verified” (in look-alike spellings too) are refused, so no name can imitate the mark. Every other comment carries an "unverified" mark. *test_lookalikes_share_a_key, test_invalid_keys_and_names*
 - Verification is decided once, when a comment arrives, and stored with it. Existing comments, including those from before the upgrade, are never marked; releasing a pseudonym removes the mark from its comments, so a later holder of the same name cannot inherit them. *test_older_comments_are_never_marked, test_upgrade_from_1_0_keeps_comments_unverified, test_release*
 - A claim is created in the same transaction as its comment and only after every other check passed; a concurrent claim of the same name fails cleanly. *test_failed_submission_claims_nothing, test_same_key_twice_at_once_is_one_pseudonym*
 - The widget only uses the server's explicit `verified: true`, and sends the key only when posting or restoring, never when loading comments. *tests/js "verified and unverified marks…", "keeping a name…"; tests/e2e/browser_e2e.py*
 - Restoring a backup (`POST /api/v1/pseudonym`) answers only the blog's own origins and is limited to 10 attempts per sender every 10 minutes; it stores nothing. *test_restore, test_restore_is_rate_limited*
 - Squatting is bounded: a name is held only while one of its comments is kept, so rejected spam releases its names when it is purged, and the owner can release any name. *test_names_without_comments_are_released*
+
+### Replies
+
+- A reply names the comment it answers by its public id; the server accepts it only for a published comment in the same thread, and files it under that comment's top-level comment, so the page is never more than one level deep. *test_only_shown_comments_in_the_same_thread_can_be_answered, test_display_stays_one_level_deep_whatever_happened_in_between*
+- The "@name · date" reference is plain data (a copy of the name and time), rendered as text; the widget links it only to an id of the expected shape that the server says is on the page. *tests/js "replies are shown one level deep…"*
+- Replies are moderated, rate limited and checked exactly like any other comment. If the comment a reply answers is held, rejected or deleted, the reply stays and is shown on its own, still naming whom it answered. *test_reply_stands_alone_when_its_comment_is_not_shown*
 
 ### Laya
 
@@ -132,7 +138,7 @@ See [docs/pseudonyms.md](docs/pseudonyms.md) for the full description.
 - **Installing Laya from the dashboard downloads and runs code** from PyPI (PyTorch, Laya and their dependencies) and model weights from Hugging Face. The Laya version is pinned, but its dependencies are not hash-pinned. Set `AFTERWORD_LAYA_INSTALL=0` to forbid this and run Laya yourself.
 - **Laya can be wrong or deliberately evaded.** Its own documentation says scores are not calibrated for a given site out of the box. Assisted mode keeps a human in charge; the dashboard shows how often Laya agreed with your past decisions.
 - **Determined, distributed spammers** can pass the basic checks; the global rate limit and moderation queue are the backstop. There is no CAPTCHA, by design.
-- **Impersonation**: names are not verified unless they are pseudonyms. Without pseudonyms, anyone can post as "Alice"; with them on, only unverified look-alikes the comparison misses remain, and those carry the "unverified" mark rather than ✓.
+- **Impersonation**: names are not verified unless they are pseudonyms. Without pseudonyms, anyone can post as "Alice"; with them on, only unverified look-alikes the comparison misses remain, and those carry the "unverified" mark.
 - **Pseudonym keys live in the blog's browser storage.** Any script running on the blog's pages (the blog itself, its plugins, or a modified `widget.js`) can read them. A reader who uses the same key on another site lets that site's operator post as them here. Readers who lose a key without a backup lose the name unless the owner releases it, and the owner cannot tell the real holder from an impostor.
 - **"Verified" is the comment server's word, not a proof readers can check themselves.** Whoever controls the server or its database can attach any name or mark to any comment.
 - **A pseudonym is not anonymity.** Its comments are publicly linked to each other, and the server sees and handles each request like any other comment (network address, keyed network hash, optional email).

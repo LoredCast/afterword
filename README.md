@@ -22,6 +22,7 @@ say so.
 - **Safe by construction.** Comments are plain text. The server never produces HTML for them, and the widget never parses HTML. See the [threat model](docs/threat-model.md).
 - **Your CSS.** No iframe, no shadow DOM, documented `afterword-…` classes. See [styling](docs/styling.md).
 - **Three moderation modes.** Manual, assisted or automatic, switchable any time.
+- **Replies, one level deep.** Every comment has a quiet “Reply” link; replies sit under their comment and start with “@name · date” to show whom they answer.
 - **Optional pseudonyms.** A reader can keep a name with a key held by their own browser. No account, email or third-party login. Nobody else can post under it, and readers see which names are verified.
 
 ## Quick start (try it locally)
@@ -136,7 +137,7 @@ decisions. Details and caveats: [docs/laya.md](docs/laya.md).
 Turn on **Settings → The comment form → Let readers keep a name as a verified
 pseudonym**. A reader who ticks **Keep this name as my pseudonym** gets a random
 key in their browser. Afterword keeps only a keyed hash of it. Comments sent
-with the key show the name with **✓ verified pseudonym**. Nobody else can post
+with the key show the name marked **verified**. Nobody else can post
 under that name, or one that looks like it, and every other name is shown as
 **unverified**. Readers can back up the key, restore it on another device, and
 are told that losing it without a backup can cost them the name. Comments from
@@ -180,13 +181,15 @@ contain email addresses, so keep them private.
 
 To upgrade, install the new version into the same environment and restart; the
 database is migrated automatically. If you pinned the widget with a
-Subresource Integrity hash, update it from **Add to your blog**. Step-by-step
-instructions for 1.0 → 1.1, including Docker Compose, a trial run on a copy of
-your data, and rolling back, are in [UPGRADING.md](UPGRADING.md).
+Subresource Integrity hash, update it from **Add to your blog**. With Docker
+Compose that is `git pull` and `docker compose up -d --build` (plain `up -d`
+keeps the old image). Step-by-step instructions, including the backup, a trial
+run on a copy of your data, rolling back, and notes for each version, are in
+[UPGRADING.md](UPGRADING.md).
 
 ## What it deliberately doesn't do
 
-No reader accounts or social logins (pseudonyms need neither), no replies or voting, no email
+No reader accounts or social logins (pseudonyms need neither), no nested threads beyond one level of replies, no voting, no email
 notifications, no Markdown beyond `*emphasis*`, `` `code` `` and links, no HTML
 ever, no images, no analytics. One dashboard user. If you need more than that,
 a full discussion platform is the better tool.

@@ -1,4 +1,4 @@
-/*! Afterword comment widget 1.1.0 — https://github.com/ (see README) — MIT */
+/*! Afterword comment widget 1.2.0 — https://github.com/ (see README) — MIT */
 /*
  * Usage (see docs/embedding.md):
  *   <div data-afterword data-thread="post-id"></div>
@@ -27,6 +27,10 @@
   var STRINGS = {
     heading: "Comments",
     formHeading: "Leave a comment",
+    compose: "Write a comment",
+    reply: "Reply",
+    replyingTo: "Replying to",
+    cancelReply: "Cancel reply",
     loading: "Loading comments…",
     loadError: "Comments could not be loaded.",
     empty: "No comments yet.",
@@ -52,11 +56,13 @@
     errorEmailInvalid: "That email address does not look right.",
     errorCommentsClosed: "Comments are closed.",
     errorOriginNotAllowed: "This site is not set up to post comments.",
-    verified: "\u2713 verified pseudonym",
-    verifiedTitle: "Only the holder of this pseudonym\u2019s key can post under it here. It says nothing about who they are.",
+    errorReplyUnavailable: "The comment you are replying to is no longer available.",
+    errorRepliesOff: "Replies are turned off here.",
+    verified: "verified",
+    verifiedTitle: "Only one reader holds the key to this name here, and they posted this. It says nothing about who they are.",
     unverified: "unverified",
     unverifiedTitle: "This name is not a pseudonym. Anyone can post under it.",
-    namePolicy: "Names marked \u2713 are pseudonyms. Only their holder can post under them, or under a name that looks like them. Any other name is shown as unverified.",
+    namePolicy: "Names marked \u201cverified\u201d are pseudonyms. Only their holder can post under them, or under a name that looks like them. Any other name is marked \u201cunverified\u201d.",
     keep: "Keep this name as my pseudonym",
     keepHelp: "Your browser will hold a secret key so that only you can post under this name here. No account, no email. Comments under a pseudonym are publicly linked to each other, and this site still sees your network address as with any comment. Save the backup key you are shown next: without it, clearing your browser or changing device can cost you the name.",
     kept: "{name} is now your pseudonym here. Save your backup key now.",
@@ -77,7 +83,7 @@
     errorPseudonymTaken: "That name, or one that looks very like it, is already someone\u2019s pseudonym here. Please choose another.",
     errorPseudonymLost: "{name} is no longer held by your key here: the site\u2019s owner released it and someone else has taken it since. Stop using it on this device to post under another name.",
     errorNameReserved: "That name is too close to someone\u2019s pseudonym here. Please choose a different name, or restore your backup key if the pseudonym is yours.",
-    errorNameCheckMark: "Please leave check marks out of your name; they mark verified pseudonyms.",
+    errorNameMarker: "Please leave \u201cverified\u201d and check marks out of your name; they mark verified names.",
     errorPseudonymNameInvalid: "A pseudonym needs at least one letter or digit.",
     errorPseudonymKeyInvalid: "That backup key does not look right.",
     errorPseudonymUnknown: "No pseudonym on this site uses that key.",
@@ -93,6 +99,20 @@
     if (className) node.className = className;
     if (text !== undefined && text !== null) node.textContent = String(text);
     return node;
+  }
+
+  function formatDate(date, withTime) {
+    var lang = document.documentElement.lang || undefined;
+    try {
+      return new Intl.DateTimeFormat(lang, withTime ? { dateStyle: "medium", timeStyle: "short" }
+                                                     : { dateStyle: "medium" }).format(date);
+    } catch (e) {
+      return withTime ? date.toLocaleString() : date.toDateString();
+    }
+  }
+
+  function commentId(value) {
+    return typeof value === "string" && /^[a-z0-9]{1,32}$/.test(value) ? value : null;
   }
 
   function fill(text, values) {
@@ -235,6 +255,7 @@
     var comments = Array.isArray(data.comments) ? data.comments : [];
     this.order = data.order === "newest" ? "newest" : "oldest";
     this.pseudonyms = data.pseudonyms === true;
+    this.replies = !!(data.open && data.form && data.form.replies === true);
     this.root.textContent = "";
     if (this.t("heading")) {
       var heading = el("h" + this.level, "afterword-heading", this.t("heading") + " ");
@@ -245,7 +266,7 @@
     this.list = el("ol", "afterword-list");
     this.emptyNote = el("p", "afterword-empty", this.t("empty"));
     for (var i = 0; i < comments.length; i++) {
-      var item = this.comment(comments[i]);
+      var item = this.comment(comments[i], false);
       if (item) this.list.appendChild(item);
     }
     this.root.appendChild(this.list);
@@ -254,13 +275,27 @@
 
     if (data.open && data.form) {
       this.token = data.form.token;
-      this.root.appendChild(this.form(data.form));
+      this.formEl = this.form(data.form);
+      // Collapsed behind a button unless the page asks for it open (data-form="open").
+      if (this.root.dataset.form !== "open") {
+        var self = this;
+        this.formEl.hidden = true;
+        var compose = el("button", "afterword-compose-button", this.t("compose"));
+        compose.type = "button";
+        compose.setAttribute("aria-expanded", "false");
+        compose.setAttribute("aria-controls", this.formEl.id);
+        compose.addEventListener("click", function () { self.openForm(); });
+        this.composeRow = el("p", "afterword-compose");
+        this.composeRow.appendChild(compose);
+        this.root.appendChild(this.composeRow);
+      }
+      this.root.appendChild(this.formEl);
       this.setState("ready");
     } else {
       this.root.appendChild(el("p", "afterword-closed", this.t("closed")));
       this.setState("closed");
     }
-    this.emit("loaded", { thread: this.thread, count: comments.length });
+    this.emit("loaded", { thread: this.thread, count: this.list.querySelectorAll(".afterword-comment").length });
     this.scrollToHash();
   };
 
@@ -268,7 +303,60 @@
     var n = this.list.children.length;
     this.list.hidden = n === 0;
     this.emptyNote.hidden = n !== 0;
-    if (this.count) this.count.textContent = String(n);
+    if (this.count) this.count.textContent = String(this.list.querySelectorAll(".afterword-comment").length);
+  };
+
+  Widget.prototype.openForm = function (focus) {
+    if (!this.formEl) return;
+    this.formEl.hidden = false;
+    if (this.composeRow) {
+      this.composeRow.hidden = true;
+      this.composeRow.firstChild.setAttribute("aria-expanded", "true");
+    }
+    var target = focus || (this.nameInput && !this.nameInput.closest("[hidden]") && !this.nameInput.value
+      ? this.nameInput : this.messageInput);
+    if (target && target.focus) target.focus();
+  };
+
+  // Replies are one level deep: the server files a reply to a reply under the
+  // same top-level comment, and the reference line says which one it answers.
+  Widget.prototype.startReply = function (c, id) {
+    this.target = { id: id, author: String(c.author), created: String(c.created) };
+    var line = this.replying;
+    line.textContent = "";
+    line.appendChild(document.createTextNode(this.t("replyingTo") + " "));
+    line.appendChild(this.reference(this.target));
+    line.appendChild(document.createTextNode(" "));
+    var self = this;
+    var cancel = el("button", "afterword-cancel-reply", this.t("cancelReply"));
+    cancel.type = "button";
+    cancel.addEventListener("click", function () {
+      self.cancelReply();
+      if (self.messageInput) self.messageInput.focus();
+    });
+    line.appendChild(cancel);
+    line.hidden = false;
+    this.openForm(this.messageInput);
+    if (this.formEl.scrollIntoView) this.formEl.scrollIntoView({ block: "nearest" });
+  };
+
+  Widget.prototype.cancelReply = function () {
+    this.target = null;
+    if (this.replying) {
+      this.replying.hidden = true;
+      this.replying.textContent = "";
+    }
+  };
+
+  // "@Mara · 24 Sep 2026, 10:00", linked to that comment when it is on the page.
+  Widget.prototype.reference = function (ref) {
+    var date = new Date(String(ref.created));
+    var label = "@" + String(ref.author || "") + (isNaN(date.getTime()) ? "" : " \u00b7 " + formatDate(date, true));
+    var id = commentId(ref.id);
+    if (!id) return el("span", "afterword-reply-ref", label);
+    var link = el("a", "afterword-reply-ref", label);
+    link.href = "#comment-" + id;
+    return link;
   };
 
   Widget.prototype.scrollToHash = function () {
@@ -278,10 +366,11 @@
     if (target && target.scrollIntoView) target.scrollIntoView();
   };
 
-  Widget.prototype.comment = function (c) {
+  Widget.prototype.comment = function (c, isReply) {
     if (!c || typeof c !== "object") return null;
-    var id = /^[a-z0-9]{1,32}$/.test(String(c.id)) ? String(c.id) : null;
-    var item = el("li", "afterword-comment");
+    var self = this;
+    var id = commentId(c.id);
+    var item = el("li", "afterword-comment" + (isReply ? " afterword-comment--reply" : ""));
     if (id) item.id = "comment-" + id;
 
     var meta = el("p", "afterword-meta");
@@ -298,13 +387,8 @@
     var time = el("time", "afterword-date");
     if (!isNaN(date.getTime())) {
       time.dateTime = date.toISOString();
-      var lang = document.documentElement.lang || undefined;
-      try {
-        time.textContent = new Intl.DateTimeFormat(lang, { dateStyle: "medium" }).format(date);
-        time.title = new Intl.DateTimeFormat(lang, { dateStyle: "full", timeStyle: "short" }).format(date);
-      } catch (e) {
-        time.textContent = date.toDateString();
-      }
+      time.textContent = formatDate(date, false);
+      time.title = formatDate(date, true);
     }
     if (id) {
       var permalink = el("a", "afterword-permalink");
@@ -315,8 +399,48 @@
       meta.appendChild(time);
     }
     item.appendChild(meta);
+    if (c.reply_to && typeof c.reply_to === "object") {
+      var ref = el("p", "afterword-reply-to");
+      ref.appendChild(this.reference(c.reply_to));
+      item.appendChild(ref);
+    }
     item.appendChild(this.body(c));
+    if (this.replies && id) {
+      var reply = el("button", "afterword-reply-button", this.t("reply"));
+      reply.type = "button";
+      reply.addEventListener("click", function () { self.startReply(c, id); });
+      var actions = el("p", "afterword-comment-actions");
+      actions.appendChild(reply);
+      item.appendChild(actions);
+    }
+    if (!isReply && Array.isArray(c.replies) && c.replies.length) {
+      var list = el("ol", "afterword-replies");
+      for (var i = 0; i < c.replies.length; i++) {
+        var child = this.comment(c.replies[i], true);
+        if (child) list.appendChild(child);
+      }
+      item.appendChild(list);
+    }
     return item;
+  };
+
+  // Where a newly published comment goes: under its top-level comment if that is shown.
+  Widget.prototype.place = function (c, item) {
+    var parentId = commentId(c.parent);
+    var children = this.list.children;
+    for (var i = 0; parentId && i < children.length; i++) {
+      if (children[i].id !== "comment-" + parentId) continue;
+      var replies = null;
+      for (var j = 0; j < children[i].children.length; j++) {
+        if (children[i].children[j].classList.contains("afterword-replies")) replies = children[i].children[j];
+      }
+      if (!replies) replies = children[i].appendChild(el("ol", "afterword-replies"));
+      item.classList.add("afterword-comment--reply");
+      replies.appendChild(item);
+      return;
+    }
+    var newestFirst = this.list.firstChild && this.order === "newest";
+    this.list.insertBefore(item, newestFirst ? this.list.firstChild : null);
   };
 
   Widget.prototype.badge = function (verified) {
@@ -577,10 +701,14 @@
   Widget.prototype.form = function (cfg) {
     var self = this;
     var form = el("form", "afterword-form");
+    form.id = "afterword-form-" + this.n;
     form.setAttribute("novalidate", "");
     if (this.t("formHeading")) {
       form.appendChild(el("h" + Math.min(6, this.level + 1), "afterword-form-heading", this.t("formHeading")));
     }
+    this.replying = form.appendChild(el("p", "afterword-replying"));
+    this.replying.setAttribute("aria-live", "polite");
+    this.replying.hidden = true;
 
     var name = el("input", "afterword-input");
     name.name = "author";
@@ -606,6 +734,8 @@
     message.name = "body";
     message.required = true;
     message.rows = 6;
+    this.messageInput = message;
+    this.nameInput = name;
     message.maxLength = cfg.maxBody || 5000;
     var hintId = "afterword-hint-" + this.n;
     message.setAttribute("aria-describedby", hintId);
@@ -690,6 +820,7 @@
       };
       var key = pseudonym ? pseudonym.keyFor(payload.author) : null;
       if (key) payload.key = key;
+      if (self.target) payload.reply_to = self.target.id;
       fetch(self.api("api/v1/comments"), {
         method: "POST", credentials: "omit", mode: "cors",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -711,20 +842,19 @@
             } catch (e) { /* storage unavailable */ }
           }
           if (data.status === "published" && data.comment) {
-            var item = self.comment(data.comment);
-            if (item) {
-              var newestFirst = self.list.firstChild && self.order === "newest";
-              self.list.insertBefore(item, newestFirst ? self.list.firstChild : null);
-            }
+            var item = self.comment(data.comment, false);
+            if (item) self.place(data.comment, item);
             self.syncEmpty();
             show("success", self.t("published"));
           } else {
             show("pending", self.t("pending"));
           }
+          self.cancelReply();
           self.emit("posted", { thread: self.thread, status: data.status || "pending" });
         } else {
           show("error", held && data.error === "pseudonym_taken"
             ? fill(self.t("errorPseudonymLost"), { name: held.name }) : self.errorText(data));
+          if (data.error === "reply_unavailable") self.cancelReply();
           if (data.field === "author") name.setAttribute("aria-invalid", "true");
           if (data.field === "email" && email) email.setAttribute("aria-invalid", "true");
           if (data.field === "body") message.setAttribute("aria-invalid", "true");
@@ -747,7 +877,7 @@
     for (var i = 0; i < nodes.length; i++) new Widget(nodes[i]).start();
   }
 
-  window.Afterword = { init: init, version: "1.1.0" };
+  window.Afterword = { init: init, version: "1.2.0" };
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () { init(); });
   } else {

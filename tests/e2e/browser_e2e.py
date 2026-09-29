@@ -7,7 +7,8 @@ whole owner and reader journey:
   first-run password -> blog address in Settings -> reader posts a comment ->
   owner publishes it in the dashboard -> comment appears on the blog ->
   owner turns on pseudonyms -> reader keeps a name -> a second browser cannot
-  use it -> the reader restores it there from the backup key -> verified marks.
+  use it -> the reader restores it there from the backup key -> verified marks ->
+  a reply, and a reply to that reply, shown one level deep with @references.
 
 It also fails on any Content-Security-Policy violation or console error in
 the dashboard, and saves screenshots to e2e-screenshots/.
@@ -133,6 +134,7 @@ def main() -> None:
             # 2. Settings: add the blog's address.
             owner.click("nav >> text=Settings")
             owner.fill("#site_origins", BLOG)
+            owner.fill("#rate_per_ip", "20")   # every reader in this test shares 127.0.0.1
             owner.click("text=Save settings")
             expect(owner.locator(".flash-ok")).to_have_text("Settings saved.")
 
@@ -141,8 +143,10 @@ def main() -> None:
             reader_errors: list[str] = []
             reader.on("pageerror", lambda e: reader_errors.append(str(e)))
             reader.goto(BLOG + "/on-keeping-a-notebook")
-            expect(reader.locator(".afterword-form")).to_be_visible()
+            expect(reader.locator(".afterword-form")).to_be_hidden()      # collapsed until wanted
             expect(reader.locator(".afterword-empty")).to_have_text("No comments yet.")
+            reader.click(".afterword-compose-button")
+            expect(reader.locator(".afterword-form")).to_be_visible()
             reader.fill(".afterword-field--name input", "Mara")
             reader.fill(".afterword-field--email input", "mara@example.org")
             reader.fill(".afterword-field--message textarea",
@@ -195,6 +199,7 @@ def main() -> None:
             expect(reader.locator(".afterword-verified")).to_have_count(0)
 
             # The reader keeps "Mara" as a pseudonym with their next comment.
+            reader.click(".afterword-compose-button")
             reader.fill(".afterword-field--name input", "Mara")
             reader.check(".afterword-field--keep input")
             expect(reader.locator(".afterword-pseudonym-help")).to_contain_text("publicly linked")
@@ -214,6 +219,7 @@ def main() -> None:
             assert backup_key in backup_text and "Name: Mara" in backup_text, backup_text
             reader.screenshot(path=f"{SHOTS}/10-blog-backup-key.png", full_page=True)
             reader.reload()   # kept across visits
+            reader.click(".afterword-compose-button")
             expect(reader.locator(".afterword-posting-as")).to_contain_text("Posting as Mara")
             # Only posting a comment sends the key; loading the page and its comments never does.
             raw_key = backup_key.replace("-", "")
@@ -227,6 +233,7 @@ def main() -> None:
             other = other_context.new_page()
             other.on("pageerror", lambda e: reader_errors.append(str(e)))
             other.goto(BLOG + "/on-keeping-a-notebook")
+            other.click(".afterword-compose-button")
             other.fill(".afterword-field--name input", "MARA")
             other.fill(".afterword-field--message textarea", "It's me, honest.")
             time.sleep(3.2)
@@ -255,10 +262,56 @@ def main() -> None:
             expect(reader.locator(".afterword-comment")).to_have_count(4)
             expect(reader.locator(".afterword-comment--verified")).to_have_count(2)
             expect(reader.locator(".afterword-comment--verified .afterword-verified").first).to_have_text(
-                "\u2713 verified pseudonym")
+                "verified")
             expect(reader.locator(".afterword-unverified")).to_have_count(2)
             reader.screenshot(path=f"{SHOTS}/12-blog-verified.png", full_page=True)
             other_context.close()
+
+            # 7. Replies: Grace answers the first comment...
+            grace_context = browser.new_context(viewport={"width": 900, "height": 1200})
+            grace = grace_context.new_page()
+            grace.on("pageerror", lambda e: reader_errors.append(str(e)))
+            grace.goto(BLOG + "/on-keeping-a-notebook")
+            first = grace.locator(".afterword-list > .afterword-comment").first
+            first.locator(":scope > .afterword-comment-actions .afterword-reply-button").click()
+            expect(grace.locator(".afterword-form")).to_be_visible()
+            expect(grace.locator(".afterword-replying")).to_contain_text("Replying to @Mara \u00b7 ")
+            grace.fill(".afterword-field--name input", "Grace")
+            grace.fill(".afterword-field--message textarea", "Lists are underrated.")
+            time.sleep(3.2)
+            grace.click(".afterword-submit")
+            expect(grace.locator(".afterword-notice--pending")).to_be_visible()
+            owner.goto(SERVER + "/admin/comments")
+            expect(owner.locator(".comment .comment-reply")).to_contain_text("Reply to @Mara")
+            owner.click("button:has-text('Publish')")
+            expect(owner.locator(".flash-ok")).to_have_text("Published 1 comment.")
+
+            # ...and Mara answers Grace's reply: it joins the same conversation, naming Grace.
+            reader.reload()
+            grace_reply = reader.locator(".afterword-comment--reply", has_text="Lists are underrated.")
+            grace_reply.locator(".afterword-reply-button").click()
+            expect(reader.locator(".afterword-replying")).to_contain_text("Replying to @Grace")
+            reader.fill(".afterword-field--message textarea", "They are. Thanks, Grace.")
+            time.sleep(3.2)
+            reader.click(".afterword-submit")
+            expect(reader.locator(".afterword-notice--pending")).to_be_visible()
+            expect(reader.locator(".afterword-replying")).to_be_hidden()
+            owner.goto(SERVER + "/admin/comments")
+            owner.click("button:has-text('Publish')")
+            expect(owner.locator(".flash-ok")).to_have_text("Published 1 comment.")
+            reader.reload()
+            conversation = reader.locator(".afterword-list > .afterword-comment").first
+            replies = conversation.locator(":scope > .afterword-replies > .afterword-comment--reply")
+            expect(replies).to_have_count(2)
+            expect(replies.nth(0).locator(".afterword-reply-to")).to_contain_text("@Mara \u00b7 ")
+            expect(replies.nth(1).locator(".afterword-reply-to")).to_contain_text("@Grace \u00b7 ")
+            expect(replies.nth(1).locator(".afterword-verified")).to_have_text("verified")
+            expect(reader.locator(".afterword-replies .afterword-replies")).to_have_count(0)
+            expect(reader.locator(".afterword-count")).to_have_text("6")
+            assert reader.eval_on_selector(".afterword-reply-button", "b => getComputedStyle(b).backgroundColor") \
+                in ("rgba(0, 0, 0, 0)", "transparent"), "reply buttons should look like quiet links"
+            reader.screenshot(path=f"{SHOTS}/13-blog-replies.png", full_page=True)
+            grace_context.close()
 
             owner.goto(SERVER + "/admin/laya")
             owner.screenshot(path=f"{SHOTS}/5-laya-page.png", full_page=True)
@@ -271,7 +324,7 @@ def main() -> None:
             mobile.click("button:has-text('Sign in')")
             expect(mobile.locator("h1")).to_have_text("Comments")
             mobile.goto(SERVER + "/admin/comments?status=approved")
-            expect(mobile.locator(".comment")).to_have_count(4)
+            expect(mobile.locator(".comment")).to_have_count(6)
             mobile.screenshot(path=f"{SHOTS}/7-dashboard-mobile.png", full_page=True)
             dark = browser.new_page(viewport={"width": 1100, "height": 900}, color_scheme="dark")
             dark.goto(SERVER + "/admin/login")
@@ -279,7 +332,7 @@ def main() -> None:
             dark.click("button:has-text('Sign in')")
             expect(dark.locator("h1")).to_have_text("Comments")
             dark.goto(SERVER + "/admin/comments?status=all")
-            expect(dark.locator(".comment")).to_have_count(4)
+            expect(dark.locator(".comment")).to_have_count(6)
             dark.screenshot(path=f"{SHOTS}/8-dashboard-dark.png", full_page=True)
             browser.close()
 

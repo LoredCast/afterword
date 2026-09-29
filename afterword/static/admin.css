@@ -231,6 +231,7 @@ thead th { font-size: 0.85rem; color: var(--ink-soft); font-weight: 600; }
   font-size: 0.8rem; font-weight: 600; color: var(--published); text-decoration: none;
   border: 1px solid currentColor; border-radius: 1rem; padding: 0 0.45rem;
 }
+.comment-reply { margin: 0 0 0.4rem; font-size: 0.9rem; color: var(--ink-soft); }
 .pseudonyms form { margin: 0; }
 .pseudonyms button { padding: 0.2rem 0.6rem; font-size: 0.85rem; }
 .muted { color: var(--ink-soft); }
