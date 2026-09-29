@@ -34,6 +34,7 @@ For pages that add content later, call `Afterword.init()` (or
 | `data-thread-from="canonical"` | The path of the page's `<link rel="canonical">`. Useful when one post is reachable at several addresses. |
 | `data-server="https://…"` | Override the server address (normally taken from the script's URL). |
 | `data-heading-level="2"` | Level of the "Comments" heading (2–6). The form heading is one level lower. |
+| `data-form="open"` | Show the comment form straight away. By default it is collapsed behind a “Write a comment” button, so only the comments are open. |
 | `data-remember="true"` | Remember the reader's name and email in their browser (localStorage) for next time. Off by default. |
 | `data-text-…="…"` | Replace any piece of text; see below. |
 
@@ -60,6 +61,10 @@ empty string to leave it out.
 |---|---|
 | `data-text-heading` | Comments |
 | `data-text-form-heading` | Leave a comment |
+| `data-text-compose` | Write a comment (the button that opens the form) |
+| `data-text-reply` | Reply |
+| `data-text-replying-to` | Replying to |
+| `data-text-cancel-reply` | Cancel reply |
 | `data-text-loading` | Loading comments… |
 | `data-text-load-error` | Comments could not be loaded. |
 | `data-text-empty` | No comments yet. |
@@ -85,6 +90,8 @@ empty string to leave it out.
 | `data-text-error-email-invalid` | That email address does not look right. |
 | `data-text-error-comments-closed` | Comments are closed. |
 | `data-text-error-origin-not-allowed` | This site is not set up to post comments. |
+| `data-text-error-reply-unavailable` | The comment you are replying to is no longer available. |
+| `data-text-error-replies-off` | Replies are turned off here. |
 
 With [pseudonyms](pseudonyms.md) turned on, these are used as well. `{name}`,
 `{site}` and `{key}` are filled in where shown. An empty `data-text-unverified`
@@ -92,11 +99,11 @@ leaves the unverified mark out, but the naming policy still applies.
 
 | Attribute | Default |
 |---|---|
-| `data-text-verified` | ✓ verified pseudonym |
-| `data-text-verified-title` | Only the holder of this pseudonym’s key can post under it here. It says nothing about who they are. |
+| `data-text-verified` | verified |
+| `data-text-verified-title` | Only one reader holds the key to this name here, and they posted this. It says nothing about who they are. |
 | `data-text-unverified` | unverified |
 | `data-text-unverified-title` | This name is not a pseudonym. Anyone can post under it. |
-| `data-text-name-policy` | Names marked ✓ are pseudonyms. Only their holder can post under them, or under a name that looks like them. Any other name is shown as unverified. |
+| `data-text-name-policy` | Names marked “verified” are pseudonyms. Only their holder can post under them, or under a name that looks like them. Any other name is marked “unverified”. |
 | `data-text-keep` | Keep this name as my pseudonym |
 | `data-text-keep-help` | Your browser will hold a secret key so that only you can post under this name here. No account, no email. Comments under a pseudonym are publicly linked to each other, and this site still sees your network address as with any comment. Save the backup key you are shown next: without it, clearing your browser or changing device can cost you the name. |
 | `data-text-kept` | {name} is now your pseudonym here. Save your backup key now. |
@@ -117,7 +124,7 @@ leaves the unverified mark out, but the naming policy still applies.
 | `data-text-error-pseudonym-taken` | That name, or one that looks very like it, is already someone’s pseudonym here. Please choose another. |
 | `data-text-error-pseudonym-lost` | {name} is no longer held by your key here: the site’s owner released it and someone else has taken it since. Stop using it on this device to post under another name. |
 | `data-text-error-name-reserved` | That name is too close to someone’s pseudonym here. Please choose a different name, or restore your backup key if the pseudonym is yours. |
-| `data-text-error-name-check-mark` | Please leave check marks out of your name; they mark verified pseudonyms. |
+| `data-text-error-name-marker` | Please leave “verified” and check marks out of your name; they mark verified names. |
 | `data-text-error-pseudonym-name-invalid` | A pseudonym needs at least one letter or digit. |
 | `data-text-error-pseudonym-key-invalid` | That backup key does not look right. |
 | `data-text-error-pseudonym-unknown` | No pseudonym on this site uses that key. |
@@ -127,7 +134,7 @@ Dates are formatted in the page's language (`<html lang="…">`).
 
 ## Structure
 
-This is what the widget builds inside your container (one comment shown):
+This is what the widget builds inside your container (one comment with one reply shown):
 
 ```html
 <div data-afterword class="afterword afterword--ready">
@@ -144,20 +151,33 @@ This is what the widget builds inside your container (one comment shown):
         <p>Text with <em>emphasis</em>, <code>code</code><br>and
            <a href="https://…" rel="nofollow ugc noopener noreferrer">https://…</a></p>
       </div>
+      <p class="afterword-comment-actions"><button class="afterword-reply-button" type="button">Reply</button></p>
+      <ol class="afterword-replies">
+        <li class="afterword-comment afterword-comment--reply" id="comment-p7q…">
+          <p class="afterword-meta">…</p>
+          <p class="afterword-reply-to"><a class="afterword-reply-ref" href="#comment-k3j2x9…">@Mara · Sep 24, 2026, 10:00 AM</a></p>
+          <div class="afterword-body">…</div>
+          <p class="afterword-comment-actions"><button class="afterword-reply-button" type="button">Reply</button></p>
+        </li>
+      </ol>
     </li>
   </ol>
   <p class="afterword-empty" hidden>No comments yet.</p>
   <!-- With pseudonyms on, the author line also carries one of:
-       <span class="afterword-verified" title="…">✓ verified pseudonym</span>
+       <span class="afterword-verified" title="…">verified</span>
        <span class="afterword-unverified" title="…">unverified</span>
        and a verified comment's <li> gets afterword-comment--verified. -->
-  <form class="afterword-form">
+  <p class="afterword-compose"><button class="afterword-compose-button" type="button"
+     aria-expanded="false">Write a comment</button></p>   <!-- not with data-form="open" -->
+  <form class="afterword-form" id="afterword-form-1" hidden>   <!-- shown by the button or a Reply -->
     <h3 class="afterword-form-heading">Leave a comment</h3>
+    <p class="afterword-replying" hidden>Replying to <a class="afterword-reply-ref" href="#comment-…">@Mara · …</a>
+      <button class="afterword-cancel-reply" type="button">Cancel reply</button></p>
     <p class="afterword-field afterword-field--name">
       <label class="afterword-label">Name</label> <input class="afterword-input">
     </p>
     <div class="afterword-pseudonym">                <!-- only with pseudonyms on -->
-      <p class="afterword-pseudonym-policy">Names marked ✓ are pseudonyms…</p>
+      <p class="afterword-pseudonym-policy">Names marked “verified” are pseudonyms…</p>
       <p class="afterword-field afterword-field--keep">
         <input class="afterword-keep" type="checkbox"> <label class="afterword-keep-label">Keep this name…</label>
       </p>
@@ -187,7 +207,7 @@ This is what the widget builds inside your container (one comment shown):
 | `afterword--loading`, `--ready`, `--error`, `--closed` | State of the container |
 | `afterword-status` | "Loading…" / "could not be loaded" line |
 | `afterword-heading` | The "Comments" heading |
-| `afterword-count` | Number of comments inside the heading |
+| `afterword-count` | Number of comments inside the heading, replies included |
 | `afterword-list` | `<ol>` of comments (hidden when empty) |
 | `afterword-comment` | One `<li>`; its id is `comment-<id>`, so `:target` works |
 | `afterword-meta` | Line with author and date |
@@ -195,10 +215,16 @@ This is what the widget builds inside your container (one comment shown):
 | `afterword-permalink` | Link to the comment |
 | `afterword-date` | `<time>` with an ISO `datetime` and a longer `title` |
 | `afterword-body` | Wrapper for the comment's paragraphs |
+| `afterword-comment-actions`, `afterword-reply-button` | The “Reply” button under each comment (only when replies are on) |
+| `afterword-replies` | `<ol>` of replies inside a top-level comment’s `<li>` (one level deep) |
+| `afterword-comment--reply` | A reply’s `<li>` |
+| `afterword-reply-to`, `afterword-reply-ref` | The “@Mara · date” line of a reply; a link when that comment is on the page |
 | `afterword-empty` | "No comments yet." (hidden when there are comments) |
 | `afterword-closed` | "Comments are closed." |
-| `afterword-form` | The form |
+| `afterword-compose`, `afterword-compose-button` | “Write a comment”, which opens the collapsed form |
+| `afterword-form` | The form (`hidden` until opened, unless `data-form="open"`) |
 | `afterword-form-heading` | "Leave a comment" |
+| `afterword-replying`, `afterword-cancel-reply` | “Replying to @Mara · date” and “Cancel reply” while answering a comment |
 | `afterword-field` | Each label + control row |
 | `afterword-field--name`, `--email`, `--message` | The specific row |
 | `afterword-label` | Labels |
@@ -217,7 +243,7 @@ instead:
 
 ```html
 <p class="afterword-posting-as">Posting as <strong class="afterword-pseudonym-name">Mara</strong>
-  <span class="afterword-verified">✓ verified pseudonym</span></p>
+  <span class="afterword-verified">verified</span></p>
 <details class="afterword-backup"><summary>Backup key</summary>
   <p class="afterword-backup-help">Anyone with this key…</p>
   <p class="afterword-field afterword-field--backup">… <input class="afterword-input afterword-backup-key" readonly></p>
@@ -229,7 +255,7 @@ instead:
 
 | Pseudonym class | Element |
 |---|---|
-| `afterword-verified` | The ✓ mark on comments posted with the pseudonym’s key, and in “Posting as” |
+| `afterword-verified` | The “verified” mark on comments posted with the pseudonym’s key, and in “Posting as” |
 | `afterword-unverified` | The mark on every other comment while pseudonyms are on |
 | `afterword-comment--verified` | A comment `<li>` posted with the key |
 | `afterword-pseudonym` | Block under the name field (`--held` once the reader holds one) |

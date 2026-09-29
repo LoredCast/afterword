@@ -13,7 +13,7 @@ form → Let readers keep a name as a verified pseudonym**.
 Under the name field, the comment form shows the naming policy and one
 checkbox:
 
-> Names marked ✓ are pseudonyms. Only their holder can post under them, or under a name that looks like them. Any other name is shown as unverified.
+> Names marked “verified” are pseudonyms. Only their holder can post under them, or under a name that looks like them. Any other name is marked “unverified”.
 >
 > ☐ Keep this name as my pseudonym
 
@@ -24,8 +24,7 @@ checkbox:
 
   > Your browser will hold a secret key so that only you can post under this name here. No account, no email. Comments under a pseudonym are publicly linked to each other, and this site still sees your network address as with any comment. Save the backup key you are shown next: without it, clearing your browser or changing device can cost you the name.
 
-- **After the first comment**, the form says *Posting as Mara ✓ verified
-  pseudonym* and opens the **backup key** so the reader can save it. They can
+- **After the first comment**, the form says *Posting as Mara verified* and opens the **backup key** so the reader can save it. They can
   copy the key or download it as a small text file. Later visits in the same
   browser keep the pseudonym without any action.
 - **On another device**, or after clearing the browser, the reader opens
@@ -34,8 +33,8 @@ checkbox:
 - **Stop using it on this device** removes the key from that browser, after a
   confirmation that warns about the backup.
 
-Every comment posted with the key shows **✓ verified pseudonym** next to the
-name. While pseudonyms are on, every other comment shows **unverified**,
+Every comment posted with the key shows **verified** next to the name, as
+plain text. While pseudonyms are on, every other comment shows **unverified**,
 including every comment written before the feature was turned on.
 
 ## What "verified" means, and what it does not
@@ -88,13 +87,14 @@ Names are compared in a form that ignores differences readers could miss:
   `0`/`o`, `1`/`l`/`I`, `rn`/`m`, `vv`/`w`.
 
 So once someone holds **Mara**, nobody can post as `mara`, `MARA`, `Mára`,
-`M a r a`, `Mara ✓` or `Mаra` (with a Cyrillic а), with or without a key. A new
-pseudonym needs at least one letter or digit. While pseudonyms are on, check
-marks (✓ ✔ ☑ ✅ √) are refused in all names, so a name cannot imitate the mark.
+`M a r a`, `Mara!` or `Mаra` (with a Cyrillic а), with or without a key. A new
+pseudonym needs at least one letter or digit. While pseudonyms are on, names
+containing the word “verified” (in any spelling the comparison catches) or a
+check mark (✓ ✔ ☑ ✅ √) are refused, so a name cannot imitate the mark.
 
-No list of look-alikes is complete. Readers should rely on the ✓ mark, not on
-the name alone. The widget shows the mark as a separate element, so a name
-cannot contain it.
+No list of look-alikes is complete. Readers should rely on the “verified”
+mark, not on the name alone. The widget shows the mark as a separate element,
+next to the name, and every other name is marked “unverified”.
 
 ## Keeping and losing names
 
@@ -118,14 +118,14 @@ cannot contain it.
 
 Turning pseudonyms off hides the controls in the widget. The server then
 refuses keys, and names are no longer reserved, so Afterword behaves as it did
-before. Comments that were posted with a key keep their ✓ mark, because that
+before. Comments that were posted with a key keep their “verified” mark, because that
 was true when they were sent. The names and key hashes stay in the database,
 so turning pseudonyms on again restores everything. Readers' browsers keep
 their keys while it is off.
 
 ## Dashboard
 
-- Comments posted with a pseudonym carry a **✓ pseudonym** tag in the queue.
+- Comments posted with a pseudonym carry a **verified** tag in the queue.
   Click it to see every comment from that holder.
 - The **Pseudonyms** page lists each held name, how long it has been held and
   how many comments it has in each state, with a **Release** button. The page

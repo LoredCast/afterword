@@ -277,7 +277,7 @@ async function submit(window, form, fields = {}) {
 test("verified and unverified marks come only from the server's verified flag", async () => {
   const comments = [
     { id: "a1", author: "Mara", created: "2026-09-20T08:00:00Z", verified: true, body: [[{ t: "text", v: "Held" }]] },
-    { id: "b2", author: "Mara ✓ verified pseudonym", created: "2026-09-21T08:00:00Z", verified: false, body: [] },
+    { id: "b2", author: "Mara verified", created: "2026-09-21T08:00:00Z", verified: false, body: [] },
     { id: "c3", author: "Old", created: "2026-09-22T08:00:00Z", verified: "yes", body: [] },
     { id: "d4", author: "Older", created: "2026-09-22T08:00:00Z", body: [] },
   ];
@@ -285,9 +285,9 @@ test("verified and unverified marks come only from the server's verified flag", 
                      routes: { "GET /api/v1/thread": withPseudonyms(comments) } });
   await tick(10);
   const items = [...on.document.querySelectorAll(".afterword-comment")];
-  assert.equal(items[0].querySelector(".afterword-meta .afterword-verified").textContent, "✓ verified pseudonym");
+  assert.equal(items[0].querySelector(".afterword-meta .afterword-verified").textContent, "verified");
   assert.ok(items[0].classList.contains("afterword-comment--verified"));
-  assert.match(items[0].querySelector(".afterword-verified").title, /holder/);
+  assert.match(items[0].querySelector(".afterword-verified").title, /holds the key/);
   for (const item of items.slice(1)) {
     assert.equal(item.querySelector(".afterword-verified"), null);
     assert.equal(item.querySelector(".afterword-unverified").textContent, "unverified");
@@ -340,7 +340,7 @@ test("keeping a name: key made in the browser, sent with the comment, backup off
   const nameRow = form.querySelector(".afterword-field--name");
   assert.ok(nameRow.hidden);
   const now = form.querySelector(".afterword-pseudonym--held");
-  assert.equal(now.querySelector(".afterword-posting-as").textContent, "Posting as Mara ✓ verified pseudonym");
+  assert.equal(now.querySelector(".afterword-posting-as").textContent, "Posting as Mara verified");
   assert.match(now.querySelector(".afterword-notice--success").textContent, /Save your backup key/);
   const backup = now.querySelector("details.afterword-backup");
   assert.ok(backup.open);
@@ -490,4 +490,146 @@ test("with pseudonyms off, a stored key is never sent", async () => {
   assert.equal(post.author, "Ada");
   assert.equal("key" in post, false);
   assert.deepEqual(stored(window), { name: "Mara", key: KEY });   // kept for when they come back on
+});
+
+// -- collapsed form and replies ---------------------------------------------------------
+
+const withReplies = (comments, extra = {}) => () => {
+  const reply = thread(comments, extra)();
+  reply.json.form.replies = true;
+  return reply;
+};
+
+test("the form is collapsed behind a button until the reader wants to write", async () => {
+  const { window, document } = setup({
+    html: '<div data-afterword data-thread="t1"></div>',
+    routes: { "GET /api/v1/thread": thread([{ id: "a1", author: "Ada", created: "2026-09-20T08:00:00Z", body: [] }]) },
+  });
+  await tick(10);
+  const root = document.querySelector("[data-afterword]");
+  const form = root.querySelector("form.afterword-form");
+  const button = root.querySelector(".afterword-compose > button.afterword-compose-button");
+  assert.ok(form.hidden);
+  assert.ok(!root.querySelector(".afterword-list").hidden);         // comments are open
+  assert.equal(button.textContent, "Write a comment");
+  assert.equal(button.type, "button");
+  assert.equal(button.getAttribute("aria-controls"), form.id);
+  assert.equal(button.getAttribute("aria-expanded"), "false");
+  // The compose button comes after the comments, where the form will open.
+  assert.ok(root.querySelector(".afterword-list").compareDocumentPosition(button) & window.Node.DOCUMENT_POSITION_FOLLOWING);
+  button.click();
+  assert.ok(!form.hidden);
+  assert.ok(button.parentNode.hidden);
+  assert.equal(button.getAttribute("aria-expanded"), "true");
+  assert.equal(document.activeElement, form.querySelector("[name=author]"));
+
+  const open = setup({ html: '<div data-afterword data-thread="t1" data-form="open"></div>',
+                       routes: { "GET /api/v1/thread": thread([]) } });
+  await tick(10);
+  assert.ok(!open.document.querySelector("form").hidden);
+  assert.equal(open.document.querySelector(".afterword-compose"), null);
+});
+
+test("replies are shown one level deep with an @name and date reference", async () => {
+  const { document } = setup({
+    html: '<div data-afterword data-thread="t1"></div>',
+    routes: { "GET /api/v1/thread": withReplies([
+      { id: "a1", author: "Ada", created: "2026-09-20T08:00:00Z", body: [[{ t: "text", v: "Top" }]], replies: [
+        { id: "r1", author: "Grace", created: "2026-09-20T09:00:00Z", parent: "a1",
+          reply_to: { id: "a1", author: "Ada", created: "2026-09-20T08:00:00Z" }, body: [[{ t: "text", v: "Hi Ada" }]],
+          replies: [{ id: "deep", author: "Too deep", created: "2026-09-20T10:00:00Z", body: [] }] },
+        { id: "r2", author: "Eve", created: "2026-09-20T11:00:00Z", parent: "a1",
+          reply_to: { id: null, author: "<img src=x onerror=alert(1)>", created: "2026-09-20T09:30:00Z" }, body: [] },
+        { id: "r3", author: "Bad", created: "2026-09-20T12:00:00Z",
+          reply_to: { id: "../../x", author: "Grace", created: "nonsense" }, body: [] },
+      ] },
+    ]) },
+  });
+  await tick(10);
+  const root = document.querySelector("[data-afterword]");
+  const top = root.querySelector(".afterword-list > li#comment-a1");
+  const replies = [...top.querySelectorAll(":scope > ol.afterword-replies > li.afterword-comment--reply")];
+  assert.deepEqual(replies.map((r) => r.id), ["comment-r1", "comment-r2", "comment-r3"]);
+  assert.equal(root.querySelector("#comment-deep"), null);           // never more than one level
+  assert.equal(root.querySelector(".afterword-count").textContent, "4");
+  const link = replies[0].querySelector(".afterword-reply-to a.afterword-reply-ref");
+  assert.equal(link.getAttribute("href"), "#comment-a1");
+  assert.match(link.textContent, /^@Ada · Sep 20, 2026, \d{1,2}:\d{2}/);
+  // A reference to a comment that is not on the page is plain text; hostile names stay text.
+  assert.equal(replies[1].querySelector(".afterword-reply-to a"), null);
+  assert.match(replies[1].querySelector(".afterword-reply-ref").textContent, /^@<img src=x onerror=alert\(1\)> · /);
+  assert.equal(root.querySelectorAll("img").length, 0);
+  assert.equal(replies[2].querySelector(".afterword-reply-to a"), null);
+  assert.equal(replies[2].querySelector(".afterword-reply-ref").textContent, "@Grace");
+  // Every comment can be answered, top-level ones and replies alike.
+  assert.equal(root.querySelectorAll("button.afterword-reply-button").length, 4);
+  assert.equal(top.querySelector(":scope > .afterword-comment-actions > button").textContent, "Reply");
+});
+
+test("replying: form opens with the reference, sends reply_to, and files the reply under its comment", async () => {
+  let reply = null;
+  const { window, document, calls } = setup({
+    html: '<div data-afterword data-thread="t1"></div>',
+    routes: {
+      "GET /api/v1/thread": withReplies([
+        { id: "a1", author: "Ada", created: "2026-09-20T08:00:00Z", body: [], replies: [
+          { id: "r1", author: "Grace", created: "2026-09-20T09:00:00Z", parent: "a1",
+            reply_to: { id: "a1", author: "Ada", created: "2026-09-20T08:00:00Z" }, body: [] }] },
+        { id: "b2", author: "Bob", created: "2026-09-21T08:00:00Z", body: [] },
+      ]),
+      "POST /api/v1/comments": () => reply,
+    },
+  });
+  await tick(10);
+  const root = document.querySelector("[data-afterword]");
+  const form = root.querySelector("form");
+  assert.ok(form.hidden);
+  root.querySelector("#comment-r1 .afterword-reply-button").click();
+  assert.ok(!form.hidden);
+  const replying = form.querySelector(".afterword-replying");
+  assert.ok(!replying.hidden);
+  assert.match(replying.textContent, /^Replying to @Grace · Sep 20, 2026/);
+  assert.equal(replying.querySelector("a").getAttribute("href"), "#comment-r1");
+  assert.equal(document.activeElement, form.querySelector("[name=body]"));
+
+  reply = { status: 201, json: { status: "published", token: "t2", comment: {
+    id: "n3w", author: "Ada", created: "2026-09-22T08:00:00Z", parent: "a1",
+    reply_to: { id: "r1", author: "Grace", created: "2026-09-20T09:00:00Z" }, body: [[{ t: "text", v: "Thanks" }]] } } };
+  await submit(window, form, { author: "Ada", body: "Thanks" });
+  const post = calls.find((c) => c.init.method === "POST").body;
+  assert.equal(post.reply_to, "r1");
+  const added = root.querySelector("#comment-a1 > ol.afterword-replies > li#comment-n3w");
+  assert.ok(added);
+  assert.ok(added.classList.contains("afterword-comment--reply"));
+  assert.equal(root.querySelector(".afterword-count").textContent, "4");
+  assert.ok(replying.hidden);                                      // reply mode ends after sending
+
+  // A plain comment afterwards carries no reply_to; so does one after "Cancel reply".
+  reply = { status: 202, json: { status: "pending", token: "t3" } };
+  root.querySelector("#comment-b2 .afterword-reply-button").click();
+  replying.querySelector("button.afterword-cancel-reply").click();
+  assert.ok(replying.hidden);
+  await submit(window, form, { author: "Ada", body: "Just a comment" });
+  const posts = calls.filter((c) => c.init.method === "POST");
+  assert.equal("reply_to" in posts[1].body, false);
+
+  // A reply to a comment that is gone: the message is shown and reply mode ends.
+  reply = { status: 400, json: { error: "reply_unavailable", message: "gone" } };
+  root.querySelector("#comment-b2 .afterword-reply-button").click();
+  await submit(window, form, { author: "Ada", body: "Too late" });
+  assert.equal(form.querySelector(".afterword-notice").textContent, "The comment you are replying to is no longer available.");
+  assert.ok(replying.hidden);
+});
+
+test("no reply buttons when replies are off, but existing replies are still shown", async () => {
+  const { document } = setup({
+    html: '<div data-afterword data-thread="t1"></div>',
+    routes: { "GET /api/v1/thread": thread([
+      { id: "a1", author: "Ada", created: "2026-09-20T08:00:00Z", body: [], replies: [
+        { id: "r1", author: "Grace", created: "2026-09-20T09:00:00Z", parent: "a1",
+          reply_to: { id: "a1", author: "Ada", created: "2026-09-20T08:00:00Z" }, body: [] }] }]) },
+  });
+  await tick(10);
+  assert.equal(document.querySelectorAll(".afterword-reply-button").length, 0);
+  assert.ok(document.querySelector("#comment-a1 .afterword-replies #comment-r1"));
 });

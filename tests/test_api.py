@@ -167,7 +167,8 @@ class ApiTests(unittest.TestCase):
                                headers={"Origin": BLOG}).json()
         self.assertEqual(data["count"], 1)
         comment = data["comments"][0]
-        self.assertEqual(set(comment), {"id", "author", "created", "verified", "text", "body"})
+        self.assertEqual(set(comment), {"id", "author", "created", "verified", "parent", "reply_to",
+                                        "text", "body", "replies"})
         raw = json.dumps(data)
         for secret in ("secret@example.com", "ip_key", "laya", "reason", "203.0.113.7"):
             self.assertNotIn(secret, raw)

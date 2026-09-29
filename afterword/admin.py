@@ -611,9 +611,12 @@ def _comment_item(req: Request, row, s: dict, now: float) -> Markup:
                     h=_list_url(req, status="all", sender=row["ip_key"]), k=row["ip_key"][:6]) \
         if row["ip_key"] else ""
     pseudonym = render(' <a class="tag tag-pseudonym" href="{h}" title="Posted with this pseudonym’s key. '
-                       'All comments from the same holder">✓ pseudonym</a>',
+                       'All comments from the same holder">verified</a>',
                        h=_list_url(req, status="all", pseudonym=str(row["pseudonym_id"]))) \
         if row["pseudonym_id"] is not None else ""
+    reply = render('<p class="comment-reply">Reply to <strong>@{a}</strong>, {w}</p>',
+                   a=row["reply_to_author"] or "", w=iso(row["reply_to_created"]).replace("T", " ")
+                   .replace("Z", " UTC") if row["reply_to_created"] else "") if row["reply_to"] else ""
     likely = row["laya_status"] == "scored" and row["laya_score"] is not None \
         and row["laya_score"] >= s["laya_flag_at"]
     return render(
@@ -623,7 +626,7 @@ def _comment_item(req: Request, row, s: dict, now: float) -> Markup:
 <p class="comment-head"><strong class="author">{author}</strong>{pseudonym}{email}
 <span class="when" title="{full}">{when}</span></p>
 <p class="comment-where">On {thread}{page_link}{sender}</p>
-<div class="comment-text">{body}</div>
+{reply}<div class="comment-text">{body}</div>
 <p class="why"><span class="status status-{status}">{label}</span> {reason}</p>
 {flags}{laya}
 <div class="actions">{buttons}
@@ -632,7 +635,7 @@ def _comment_item(req: Request, row, s: dict, now: float) -> Markup:
 </div>
 </li>""",
         status=row["status"], likely=" is-likely-spam" if likely else "", pid=pid,
-        author=row["author"], pseudonym=pseudonym,
+        author=row["author"], pseudonym=pseudonym, reply=reply,
         email=render(' <span class="email">{e}</span>', e=row["email"]) if row["email"] else "",
         full=iso(row["created_at"]).replace("T", " ").replace("Z", " UTC"),
         when=ago(row["created_at"], now), thread=thread_link, page_link=page_link, sender=sender,
@@ -707,7 +710,8 @@ def comment_action(app, req: Request, session) -> Response:
 # ---------------------------------------------------------------------------
 
 SETTINGS_KEYS = ["site_origins", "comments_open", "moderation_mode", "automatic_decider",
-                 "formatting", "linkify", "ask_email", "pseudonyms", "thread_order", "max_body_chars",
+                 "formatting", "linkify", "ask_email", "replies", "pseudonyms", "thread_order",
+                 "max_body_chars",
                  "min_seconds", "max_links", "hold_duplicates", "blocked_terms", "rate_per_ip",
                  "rate_global", "purge_rejected_days"]
 
@@ -745,7 +749,7 @@ def settings_page(app, req: Request, session) -> Response:
 <p class="help">Laya’s thresholds and what happens when it cannot answer are on the <a href="{laya}">Laya page</a>.</p></div>
 </section>
 <section class="panel"><h2>The comment form</h2>
-{formatting}{linkify}{email}{pseudonyms}
+{formatting}{linkify}{email}{replies}{pseudonyms}
 <p class="help sub">Readers never need an account, an email address or another site’s login for this. <a href="{pseudonyms_page}">About pseudonyms, and the names held so far</a>.</p>
 {order}{maxbody}
 </section>
@@ -766,11 +770,15 @@ def settings_page(app, req: Request, session) -> Response:
                       'see the notes below.</p>') if errors else "",
         csrf=csrf_field(session), laya=req.url("/admin/laya"),
         pseudonyms_page=req.url("/admin/pseudonyms"),
+        replies=form.checkbox("replies", "Let readers reply to comments",
+                              "Replies are shown one level deep, under the comment they belong to. A reply "
+                              "to a reply joins the same conversation and starts with “@name, date” to "
+                              "show whom it answers. Replies are moderated like any other comment."),
         pseudonyms=form.checkbox("pseudonyms", "Let readers keep a name as a verified pseudonym",
                                  "A reader can tick a box to keep their name. Their browser holds a secret "
-                                 "key, and only comments sent with it show the name with “✓ verified "
-                                 "pseudonym”. Nobody else can post under that name or a look-alike; all "
-                                 "other names are marked “unverified”. Older comments are never marked."),
+                                 "key, and only comments sent with it show the name as “verified”. "
+                                 "Nobody else can post under that name or a look-alike; all other names "
+                                 "are marked “unverified”. Older comments are never marked."),
         origins=form.textarea("site_origins", "Blog address",
                               "The address of the blog that shows the comments, for example "
                               "https://blog.example.com. One per line if you have several. Only these "
@@ -865,7 +873,7 @@ def pseudonyms_page(app, req: Request, session) -> Response:
         """<h1>Pseudonyms</h1>
 {off}
 <section class="panel"><h2>How they work</h2>
-<p>A reader who ticks “Keep this name as my pseudonym” gets a secret key in their browser. Afterword stores only a keyed hash of it, together with the name. Comments sent with the key show the name with “✓ verified pseudonym”. Nobody else can post under that name, or one that looks like it; every other name is shown as “unverified”. Readers can save the key and restore it on another device. Comments written before a name was claimed are never marked.</p>
+<p>A reader who ticks “Keep this name as my pseudonym” gets a secret key in their browser. Afterword stores only a keyed hash of it, together with the name. Comments sent with the key show the name marked “verified”. Nobody else can post under that name, or one that looks like it; every other name is shown as “unverified”. Readers can save the key and restore it on another device. Comments written before a name was claimed are never marked.</p>
 <p>“Verified” means only that the comment was sent with the same key. Afterword does not know who holds it. A pseudonym links its comments to each other in public, and it hides nothing from this server: requests are handled exactly like any other comment.</p>
 <p>A name stays held while at least one of its comments is kept here, rejected ones included, until they are deleted. Release a name that spam has taken, or whose holder lost their key and asked you to. Its comments are then shown as unverified and anyone can claim the name. You cannot tell a holder who lost their key from someone pretending to be them.</p>
 </section>

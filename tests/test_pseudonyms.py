@@ -116,10 +116,12 @@ class PseudonymApiTests(unittest.TestCase):
                 self.assertEqual((res.status, res.json()["error"]), (400, "pseudonym_key_invalid"))
         res = self.claim(author="🦊✨")
         self.assertEqual((res.status, res.json()["error"]), (400, "pseudonym_name_invalid"))
-        for name in ("Mara ✓", "✔ Bob", "Ann ✅"):
+        for name in ("Mara ✓", "✔ Bob", "Ann ✅", "Mara verified", "VERIFIED Joe",
+                     "Bob (v e r i f i e d)", "Unverified Ann"):
             with self.subTest(name=name):
                 res = post_comment(self.reader, author=name)
-                self.assertEqual((res.status, res.json()["error"]), (400, "name_check_mark"))
+                self.assertEqual((res.status, res.json()["error"]), (400, "name_marker"))
+        self.assertEqual(post_comment(self.reader, author="Vera Fied").status, 201)
         self.assertEqual(self.db().execute("SELECT COUNT(*) FROM pseudonyms").fetchone()[0], 0)
 
     def test_failed_submission_claims_nothing(self):

@@ -1,12 +1,16 @@
 """Public JSON API used by the widget.
 
 GET  /api/v1/thread?id=<thread>   approved comments + a fresh form token
-POST /api/v1/comments             submit a comment (optionally with a pseudonym key)
+POST /api/v1/comments             submit a comment (optionally a reply, optionally with a pseudonym key)
 POST /api/v1/pseudonym            which pseudonym a backup key belongs to
 
 Only approved comments are ever returned, and only these fields: id, author,
-created, verified, text and body. Email addresses, network keys, pseudonym key
-hashes, moderation reasons and Laya scores never leave the dashboard.
+created, verified, parent, reply_to, text, body, and replies on top-level
+comments. Email addresses, network keys, pseudonym key hashes, moderation
+reasons and Laya scores never leave the dashboard.
+
+Replies are one level deep: a reply to a reply joins the same top-level
+comment, and its reply_to names the comment it actually answers.
 """
 from __future__ import annotations
 
@@ -28,7 +32,9 @@ MAX_THREAD = 300
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_THREAD_COMMENTS = 1000
 RESTORE_LIMIT = 10          # backup-key lookups per sender per 10 minutes
-PUBLIC_COLUMNS = "public_id, author, body, created_at, pseudonym_id"
+PUBLIC_COLUMNS = ("id, public_id, author, body, created_at, pseudonym_id, parent_id, reply_to, "
+                  "reply_to_author, reply_to_created")
+MAX_PARENT_HOPS = 10         # parent chains are one step long; this only bounds bad data
 _EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s.]{2,}$")
 
 
@@ -48,13 +54,23 @@ def valid_thread(raw) -> str | None:
     return thread
 
 
-def public_comment(row, settings: dict) -> dict:
+def public_comment(row, settings: dict, parent: str | None = None,
+                   reply_to_shown: bool = False) -> dict:
+    """parent: public id of the top-level comment this is shown under, if any.
+    reply_to_shown: whether the comment it answers is on the page, so it can be linked."""
+    reply_to = None
+    if row["reply_to"]:
+        reply_to = {"id": row["reply_to"] if reply_to_shown else None,
+                    "author": row["reply_to_author"] or "",
+                    "created": iso(row["reply_to_created"]) if row["reply_to_created"] else None}
     return {
         "id": row["public_id"],
         "author": row["author"],
         "created": iso(row["created_at"]),
         # Posted with the pseudonym's key. Never true for comments from before pseudonyms.
         "verified": row["pseudonym_id"] is not None,
+        "parent": parent,
+        "reply_to": reply_to,
         "text": row["body"],
         "body": textmod.render(row["body"], formatting=settings["formatting"],
                                linkify=settings["linkify"]),
@@ -123,6 +139,7 @@ def form_config(app, thread: str, settings: dict) -> dict:
         "maxName": MAX_NAME,
         "maxBody": settings["max_body_chars"],
         "email": settings["ask_email"],
+        "replies": settings["replies"],
         "formatting": settings["formatting"],
         "links": settings["formatting"] == "basic" and settings["linkify"],
     }
@@ -133,21 +150,79 @@ def get_thread(app, req: Request, settings: dict, headers: dict) -> Response:
     if thread is None:
         return _error(400, "invalid_thread", "Missing or invalid thread id.", headers)
     order = "ASC" if settings["thread_order"] == "oldest" else "DESC"
-    rows = app.db.conn().execute(
+    # With more than MAX_THREAD_COMMENTS, keep the oldest or the newest ones, as shown.
+    rows = sorted(app.db.conn().execute(
         f"SELECT {PUBLIC_COLUMNS} FROM comments "
         f"WHERE thread = ? AND status = 'approved' ORDER BY created_at {order}, id {order} LIMIT ?",
         (thread, MAX_THREAD_COMMENTS),
-    ).fetchall()
+    ).fetchall(), key=lambda r: (r["created_at"], r["id"]))
     data = {
         "thread": thread,
         "open": settings["comments_open"],
         "order": settings["thread_order"],
         "pseudonyms": settings["pseudonyms"],
         "count": len(rows),
-        "comments": [public_comment(r, settings) for r in rows],
+        "comments": grouped(rows, settings),
         "form": form_config(app, thread, settings) if settings["comments_open"] else None,
     }
     return json_response(data, headers=headers)
+
+
+def grouped(rows, settings: dict) -> list[dict]:
+    """Top-level comments in the owner's order, each with its replies oldest first.
+
+    A reply is shown under the top-level comment its parent chain leads to; if
+    that comment is not shown (held, rejected or deleted), the reply is shown
+    on its own, still naming whom it answered.
+    """
+    by_id = {r["id"]: r for r in rows}
+    shown = {r["public_id"] for r in rows}
+
+    def root(r):
+        for _ in range(MAX_PARENT_HOPS):
+            if r["parent_id"] not in by_id:
+                break
+            r = by_id[r["parent_id"]]
+        return r
+
+    tops, replies = [], {}
+    for r in rows:
+        top = root(r)
+        if top is r:
+            tops.append(r)
+        else:
+            replies.setdefault(top["id"], []).append(r)
+    if settings["thread_order"] == "newest":
+        tops.reverse()
+    result = []
+    for top in tops:
+        item = public_comment(top, settings, reply_to_shown=top["reply_to"] in shown)
+        item["replies"] = [public_comment(r, settings, parent=top["public_id"],
+                                          reply_to_shown=r["reply_to"] in shown)
+                           for r in replies.get(top["id"], [])]
+        result.append(item)
+    return result
+
+
+def reply_target(conn, thread: str, raw) -> tuple | None:
+    """The comment being answered and the top-level comment the reply goes under."""
+    if not (isinstance(raw, str) and 0 < len(raw) <= 32 and raw.isascii() and raw.isalnum()):
+        return None
+    target = conn.execute("SELECT id, public_id, parent_id, author, created_at FROM comments "
+                          "WHERE public_id = ? AND thread = ? AND status = 'approved'",
+                          (raw, thread)).fetchone()
+    if target is None:
+        return None
+    top = target
+    for _ in range(MAX_PARENT_HOPS):
+        if top["parent_id"] is None:
+            break
+        up = conn.execute("SELECT id, public_id, parent_id FROM comments WHERE id = ? "
+                          "AND status = 'approved'", (top["parent_id"],)).fetchone()
+        if up is None:
+            break
+        top = up
+    return target, top
 
 
 def post_comment(app, req: Request, settings: dict, headers: dict) -> Response:
@@ -177,15 +252,18 @@ def post_comment(app, req: Request, settings: dict, headers: dict) -> Response:
     if len(author) > MAX_NAME:
         return _error(400, "name_too_long", f"Please keep your name under {MAX_NAME} characters.",
                       headers, "author")
-    if settings["pseudonyms"] and pseudonyms.has_check_mark(author):
-        return _error(400, "name_check_mark",
-                      "Please leave check marks out of your name; they mark verified pseudonyms.",
-                      headers, "author")
+    if settings["pseudonyms"] and pseudonyms.imitates_mark(author):
+        return _error(400, "name_marker",
+                      "Please leave “verified” and check marks out of your name; they mark "
+                      "verified names.", headers, "author")
     raw_key = data.get("key")
     if raw_key not in (None, "") and not settings["pseudonyms"]:
         return _error(403, "pseudonyms_off",
                       "Pseudonyms are turned off on this site. Reload the page to post without one.",
                       headers)
+    raw_reply = data.get("reply_to")
+    if raw_reply not in (None, "") and not settings["replies"]:
+        return _error(403, "replies_off", "Replies are turned off on this site.", headers)
 
     email = None
     if settings["ask_email"]:
@@ -219,6 +297,13 @@ def post_comment(app, req: Request, settings: dict, headers: dict) -> Response:
                       headers, extra_headers={"Retry-After": str(int(wait) + 1)})
 
     conn = app.db.conn()
+    answering = None
+    if raw_reply not in (None, ""):
+        answering = reply_target(conn, thread, raw_reply)
+        if answering is None:
+            return _error(400, "reply_unavailable",
+                          "The comment you are replying to is no longer available. "
+                          "Please reload the page.", headers)
     claim = None
     if settings["pseudonyms"]:
         try:
@@ -241,6 +326,10 @@ def post_comment(app, req: Request, settings: dict, headers: dict) -> Response:
         "public_id": pid, "thread": thread, "page_url": page_url, "author": author,
         "email": email, "body": body, "body_hash": moderation.body_hash(body),
         "flags": json.dumps(flags), "created_at": int(now), "ip_key": ipk,
+        "parent_id": answering[1]["id"] if answering else None,
+        "reply_to": answering[0]["public_id"] if answering else None,
+        "reply_to_author": answering[0]["author"] if answering else None,
+        "reply_to_created": answering[0]["created_at"] if answering else None,
     }
 
     if use_laya:
@@ -250,9 +339,11 @@ def post_comment(app, req: Request, settings: dict, headers: dict) -> Response:
                 row["pseudonym_id"] = pseudonyms.attach(conn, claim, int(now))
                 conn.execute(
                     "INSERT INTO comments (public_id, thread, page_url, author, email, body, body_hash, "
-                    "status, reason, flags, created_at, ip_key, pseudonym_id) VALUES (:public_id, "
-                    ":thread, :page_url, :author, :email, :body, :body_hash, 'pending', "
-                    "'Received; waiting for Laya.', :flags, :created_at, :ip_key, :pseudonym_id)", row)
+                    "status, reason, flags, created_at, ip_key, pseudonym_id, parent_id, reply_to, "
+                    "reply_to_author, reply_to_created) VALUES (:public_id, :thread, :page_url, "
+                    ":author, :email, :body, :body_hash, 'pending', 'Received; waiting for Laya.', "
+                    ":flags, :created_at, :ip_key, :pseudonym_id, :parent_id, :reply_to, "
+                    ":reply_to_author, :reply_to_created)", row)
         except pseudonyms.Problem as exc:
             return _error(exc.status, exc.code, exc.message, headers, exc.field)
         if settings["laya_enabled"]:
@@ -281,10 +372,11 @@ def post_comment(app, req: Request, settings: dict, headers: dict) -> Response:
                 row["pseudonym_id"] = pseudonyms.attach(conn, claim, int(now))
                 conn.execute(
                     "INSERT INTO comments (public_id, thread, page_url, author, email, body, body_hash, "
-                    "status, reason, decided_by, decided_at, flags, created_at, ip_key, pseudonym_id) "
-                    "VALUES (:public_id, :thread, :page_url, :author, :email, :body, :body_hash, "
-                    ":status, :reason, :decided_by, :decided_at, :flags, :created_at, :ip_key, "
-                    ":pseudonym_id)", row)
+                    "status, reason, decided_by, decided_at, flags, created_at, ip_key, pseudonym_id, "
+                    "parent_id, reply_to, reply_to_author, reply_to_created) VALUES (:public_id, "
+                    ":thread, :page_url, :author, :email, :body, :body_hash, :status, :reason, "
+                    ":decided_by, :decided_at, :flags, :created_at, :ip_key, :pseudonym_id, "
+                    ":parent_id, :reply_to, :reply_to_author, :reply_to_created)", row)
         except pseudonyms.Problem as exc:
             return _error(exc.status, exc.code, exc.message, headers, exc.field)
 
@@ -299,7 +391,9 @@ def post_comment(app, req: Request, settings: dict, headers: dict) -> Response:
     if decision.status == "approved":
         saved = conn.execute(f"SELECT {PUBLIC_COLUMNS} FROM comments WHERE public_id = ?",
                              (pid,)).fetchone()
-        return json_response({"status": "published", "comment": public_comment(saved, settings),
+        comment = public_comment(saved, settings, reply_to_shown=answering is not None,
+                                 parent=answering[1]["public_id"] if answering else None)
+        return json_response({"status": "published", "comment": comment,
                               "token": next_token, **extra}, status=201, headers=headers)
     # Rejected comments get the same answer as pending ones: spammers learn nothing.
     return json_response({"status": "pending", "token": next_token, **extra}, status=202,
