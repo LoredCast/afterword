@@ -10,20 +10,25 @@ form → Let readers keep a name as a verified pseudonym**.
 
 ## What readers see
 
-Under the name field, the comment form shows the naming policy and one
-checkbox:
+Under the name field, the comment form shows one checkbox:
 
-> Names marked “verified” are pseudonyms. Only their holder can post under them, or under a name that looks like them. Any other name is marked “unverified”.
->
-> ☐ Keep this name as my pseudonym
+> ☐ Keep this name as my pseudonym (?)
 
-- **Without ticking it**, a reader comments as before, under any name that is
-  not someone's pseudonym. The comment is shown with an `unverified` mark.
-- **Ticking it** first shows what it means. Before sending, the reader reads
-  this:
+The explanations stay out of the way behind small **?** marks. Hovering a
+**?** shows the text as a tooltip; clicking or tapping it (or Enter or Space)
+shows it on the page. Screen readers announce it with the field.
+
+- **The ? next to “Name”** gives the naming policy:
+
+  > Names marked “verified” are pseudonyms. Only their holder can post under them, or under a name that looks like them. Any other name is marked “unverified”.
+
+- **The ? next to the checkbox** says what keeping a name means:
 
   > Your browser will hold a secret key so that only you can post under this name here. No account, no email. Comments under a pseudonym are publicly linked to each other, and this site still sees your network address as with any comment. Save the backup key you are shown next: without it, clearing your browser or changing device can cost you the name.
 
+- **Without ticking it**, a reader comments as before, under any name that is
+  not someone's pseudonym. The comment is shown with an `unverified` mark. If
+  the name is too close to a pseudonym, the error message states the policy.
 - **After the first comment**, the form says *Posting as Mara verified* and opens the **backup key** so the reader can save it. They can
   copy the key or download it as a small text file. Later visits in the same
   browser keep the pseudonym without any action.

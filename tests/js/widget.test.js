@@ -100,7 +100,11 @@ test("documented structure and classes", async () => {
   assert.ok(root.querySelector(".afterword-empty").hidden);
 
   const form = root.querySelector("form.afterword-form");
-  assert.ok(form.querySelector("h3.afterword-form-heading"));
+  // Folded away under "Write a comment", which replaces the form heading.
+  assert.equal(form.parentNode.tagName, "DETAILS");
+  assert.ok(form.parentNode.classList.contains("afterword-compose"));
+  assert.equal(form.parentNode.querySelector(":scope > summary.afterword-compose-summary").textContent, "Write a comment");
+  assert.equal(form.querySelector(".afterword-form-heading"), null);
   for (const [kind, selector] of [["name", "input.afterword-input"], ["email", "input.afterword-input"],
                                   ["message", "textarea.afterword-textarea"]]) {
     const field = form.querySelector(`.afterword-field.afterword-field--${kind}`);
@@ -108,7 +112,11 @@ test("documented structure and classes", async () => {
     assert.equal(field.querySelector("label.afterword-label").htmlFor, control.id);
   }
   assert.equal(form.querySelector("textarea").maxLength, 5000);
-  assert.match(form.querySelector(".afterword-hint").textContent, /Links/);
+  const hint = form.querySelector(".afterword-field--message .afterword-info .afterword-info-text");
+  assert.match(hint.textContent, /Links/);
+  assert.ok(hint.hidden);                                              // behind the "?"
+  assert.equal(form.querySelector("textarea").getAttribute("aria-describedby"), hint.id);
+  assert.equal(form.querySelector(".afterword-field--message .afterword-info-mark").title, hint.textContent);
   const trap = form.querySelector(".afterword-hp");
   assert.equal(trap.getAttribute("aria-hidden"), "true");
   assert.equal(trap.querySelector("input").name, "website");
@@ -247,7 +255,7 @@ test("load failure and closed threads", async () => {
 
 test("email field and hints follow server settings; loaded event fires", async () => {
   const { window, document } = setup({
-    html: '<div data-afterword data-thread="t1" data-heading-level="3" data-text-heading=""></div>',
+    html: '<div data-afterword data-thread="t1" data-heading-level="3" data-text-heading="" data-form="open"></div>',
     routes: { "GET /api/v1/thread": thread([], { form: { token: "x", email: false, formatting: "plain", links: false } }) },
   });
   let detail = null;
@@ -256,7 +264,7 @@ test("email field and hints follow server settings; loaded event fires", async (
   assert.equal(document.querySelector("[name=email]"), null);
   assert.equal(document.querySelector(".afterword-heading"), null);      // heading text set to empty
   assert.ok(document.querySelector("h4.afterword-form-heading"));
-  assert.match(document.querySelector(".afterword-hint").textContent, /Line breaks are kept/);
+  assert.match(document.querySelector(".afterword-field--message .afterword-info-text").textContent, /Line breaks are kept/);
   assert.deepEqual({ ...detail }, { thread: "t1", count: 0 });
   assert.ok(window.Afterword && typeof window.Afterword.init === "function");
 });
@@ -316,19 +324,30 @@ test("keeping a name: key made in the browser, sent with the comment, backup off
   const form = document.querySelector("form");
   const box = form.querySelector(".afterword-pseudonym");
   assert.ok(box.compareDocumentPosition(form.querySelector(".afterword-field--name")) & window.Node.DOCUMENT_POSITION_PRECEDING);
-  assert.match(box.querySelector(".afterword-pseudonym-policy").textContent, /unverified/);
+  // Explanations wait behind a "?": the naming policy by the name, the details by the checkbox.
+  const policy = form.querySelector(".afterword-field--name .afterword-info-text");
+  assert.match(policy.textContent, /unverified/);
+  assert.ok(policy.hidden);
+  assert.equal(form.querySelector("[name=author]").getAttribute("aria-describedby"), policy.id);
   const keep = box.querySelector("input[type=checkbox][name=keep]");
   assert.equal(box.querySelector(`label[for="${keep.id}"]`).textContent, "Keep this name as my pseudonym");
-  const help = box.querySelector(".afterword-pseudonym-help");
+  const help = box.querySelector(".afterword-field--keep .afterword-info-text");
+  assert.equal(keep.getAttribute("aria-describedby"), help.id);
   assert.ok(help.hidden);
-  keep.checked = true;
-  keep.dispatchEvent(new window.Event("change"));
+  const mark = box.querySelector(".afterword-field--keep .afterword-info-mark");
+  assert.equal(mark.textContent, "?");
+  assert.equal(mark.title, help.textContent);                        // hover shows it as a tooltip
+  mark.click();                                                       // tap or click shows it inline
   assert.ok(!help.hidden);
+  assert.equal(mark.getAttribute("aria-expanded"), "true");
+  mark.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }));
+  assert.ok(help.hidden);
   assert.match(help.textContent, /No account, no email/);
   assert.match(help.textContent, /publicly linked/);
   assert.match(help.textContent, /network address/);
   assert.match(help.textContent, /backup key/);
 
+  keep.checked = true;
   await submit(window, form, { author: " Mara ", body: "First!" });
   const first = calls.filter((c) => c.init.method === "POST")[0].body;
   assert.match(first.key, /^[a-z2-7]{32}$/);
@@ -500,35 +519,42 @@ const withReplies = (comments, extra = {}) => () => {
   return reply;
 };
 
-test("the form is collapsed behind a button until the reader wants to write", async () => {
+test("the form folds open and shut under Write a comment, like Restore a pseudonym", async () => {
   const { window, document } = setup({
     html: '<div data-afterword data-thread="t1"></div>',
-    routes: { "GET /api/v1/thread": thread([{ id: "a1", author: "Ada", created: "2026-09-20T08:00:00Z", body: [] }]) },
+    routes: { "GET /api/v1/thread": withReplies([{ id: "a1", author: "Ada", created: "2026-09-20T08:00:00Z", body: [] }]) },
   });
   await tick(10);
   const root = document.querySelector("[data-afterword]");
   const form = root.querySelector("form.afterword-form");
-  const button = root.querySelector(".afterword-compose > a.afterword-compose-button");
-  assert.ok(form.hidden);
-  assert.ok(!root.querySelector(".afterword-list").hidden);         // comments are open
-  assert.equal(button.textContent, "Write a comment");
-  assert.equal(button.getAttribute("role"), "button");
-  assert.equal(button.getAttribute("href"), "#" + form.id);
-  assert.equal(button.getAttribute("aria-controls"), form.id);
-  assert.equal(button.getAttribute("aria-expanded"), "false");
-  // The compose button comes after the comments, where the form will open.
-  assert.ok(root.querySelector(".afterword-list").compareDocumentPosition(button) & window.Node.DOCUMENT_POSITION_FOLLOWING);
-  button.click();
-  assert.ok(!form.hidden);
-  assert.ok(button.parentNode.hidden);
-  assert.equal(button.getAttribute("aria-expanded"), "true");
-  assert.equal(document.activeElement, form.querySelector("[name=author]"));
+  const compose = root.querySelector("details.afterword-compose");
+  const summary = compose.querySelector(":scope > summary");
+  assert.equal(form.parentNode, compose);
+  assert.ok(!compose.open);
+  assert.ok(!root.querySelector(".afterword-list").hidden);          // comments are open
+  assert.equal(summary.textContent, "Write a comment");
+  // It comes after the comments, and summary is not a button: no blog button style.
+  assert.ok(root.querySelector(".afterword-list").compareDocumentPosition(compose) & window.Node.DOCUMENT_POSITION_FOLLOWING);
+  summary.click();
+  assert.ok(compose.open);
+  summary.click();
+  assert.ok(!compose.open);
 
+  // Reply opens it; closing it again drops the reply in progress.
+  root.querySelector("#comment-a1 .afterword-reply-button").click();
+  assert.ok(compose.open);
+  assert.ok(!form.querySelector(".afterword-replying").hidden);
+  summary.click();
+  await tick(5);                                                      // "toggle" fires asynchronously
+  assert.ok(!compose.open);
+  assert.ok(form.querySelector(".afterword-replying").hidden);
+
+  // data-form="open" keeps the classic always-open form with its heading.
   const open = setup({ html: '<div data-afterword data-thread="t1" data-form="open"></div>',
                        routes: { "GET /api/v1/thread": thread([]) } });
   await tick(10);
-  assert.ok(!open.document.querySelector("form").hidden);
   assert.equal(open.document.querySelector(".afterword-compose"), null);
+  assert.ok(open.document.querySelector("form > h3.afterword-form-heading"));
 });
 
 test("replies are shown one level deep with an @name and date reference", async () => {
@@ -584,9 +610,9 @@ test("replying: form opens with the reference, sends reply_to, and files the rep
   await tick(10);
   const root = document.querySelector("[data-afterword]");
   const form = root.querySelector("form");
-  assert.ok(form.hidden);
+  assert.ok(!form.parentNode.open);
   root.querySelector("#comment-r1 .afterword-reply-button").click();
-  assert.ok(!form.hidden);
+  assert.ok(form.parentNode.open);
   const replying = form.querySelector(".afterword-replying");
   assert.ok(!replying.hidden);
   assert.match(replying.textContent, /^Replying to @Grace · Sep 20, 2026/);
@@ -647,15 +673,18 @@ test("only Post comment is a button; every other control is a link that Space an
   const buttons = [...root.querySelectorAll("button")];
   assert.deepEqual(buttons.map((b) => b.className), ["afterword-submit"]);
   const links = [...root.querySelectorAll("a[role=button]")].map((a) => a.className);
-  for (const name of ["afterword-compose-button", "afterword-reply-button", "afterword-copy", "afterword-forget"]) {
+  for (const name of ["afterword-reply-button", "afterword-copy", "afterword-forget", "afterword-info-mark"]) {
     assert.ok(links.includes(name), name);
   }
   // Space activates a link-button (Enter does natively), without scrolling the page.
-  const compose = root.querySelector(".afterword-compose-button");
+  const mark = root.querySelector(".afterword-field--backup .afterword-info-mark");
+  const tip = document.getElementById(mark.getAttribute("aria-controls"));
+  assert.ok(tip.hidden);
   const space = new window.KeyboardEvent("keydown", { key: " ", cancelable: true });
-  compose.dispatchEvent(space);
+  mark.dispatchEvent(space);
   assert.ok(space.defaultPrevented);
-  assert.ok(!root.querySelector("form").hidden);
+  assert.ok(!tip.hidden);
+  assert.match(tip.textContent, /Anyone with this key can post as Mara here/);
   // Clicking a link-button never navigates away.
   const click = new window.MouseEvent("click", { cancelable: true, bubbles: true });
   root.querySelector(".afterword-reply-button").dispatchEvent(click);

@@ -148,13 +148,14 @@
 }
 
 .afterword-label {
-  display: block;
+  display: inline-block;         /* leaves room for a "?" on the same line */
   margin-bottom: 0.3em;
   font-size: 0.9em;
 }
 
 .afterword-input,
 .afterword-textarea {
+  display: block;
   box-sizing: border-box;
   width: 100%;
   max-width: 36em;
@@ -166,10 +167,61 @@
   resize: vertical;
 }
 
-.afterword-hint {
-  margin: -0.5em 0 1em;
-  font-size: 0.85em;
-  opacity: 0.7;
+/* "Write a comment" folds the form open and shut, like the other disclosures. */
+.afterword-compose > summary {
+  cursor: pointer;
+}
+
+.afterword-compose[open] > summary {
+  margin-bottom: 1em;
+}
+
+/* A "?" whose explanation shows as a tooltip on hover, or in a bubble on click. */
+.afterword-info {
+  position: relative;
+}
+
+.afterword-info-mark {
+  display: inline-block;
+  width: 1.4em;
+  height: 1.4em;
+  line-height: 1.4em;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  color: inherit;
+  font-size: 0.7em;
+  text-align: center;
+  text-decoration: none;
+  vertical-align: 0.15em;
+  opacity: 0.6;
+}
+
+.afterword-info-mark:hover,
+.afterword-info-mark:focus-visible,
+.afterword-info-mark[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.afterword-info-text {
+  position: absolute;
+  top: 1.6em;
+  left: 0;
+  z-index: 10;
+  width: max-content;
+  max-width: min(24em, 80vw);
+  padding: 0.6em 0.8em;
+  border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+  border-radius: 0.3em;
+  background: Canvas;
+  color: CanvasText;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 15%);
+  font-size: 0.8rem;
+  font-weight: normal;
+  line-height: 1.45;
+}
+
+.afterword-info-text[hidden] {
+  display: none;
 }
 
 .afterword-pseudonym {
@@ -178,13 +230,6 @@
 
 .afterword-pseudonym p {
   margin: 0 0 0.5em;
-}
-
-.afterword-pseudonym-policy,
-.afterword-pseudonym-help,
-.afterword-backup-help {
-  font-size: 0.85em;
-  opacity: 0.7;
 }
 
 .afterword-pseudonym summary {
