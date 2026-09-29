@@ -10,6 +10,8 @@
  *   - Links are rebuilt from a URL string, allowed only for http(s) without
  *     credentials, and always get rel="nofollow ugc noopener noreferrer".
  *   - Requests never include cookies (credentials: "omit").
+ *   - "Post comment" is the only <button>. Every other control is an <a> with
+ *     role="button", so it looks like a link in any blog theme.
  *   - A pseudonym key (see docs/pseudonyms.md) is made here with
  *     crypto.getRandomValues, kept in this site's localStorage, and sent only
  *     when posting a comment or restoring a backup, never when loading comments.
@@ -99,6 +101,25 @@
     if (className) node.className = className;
     if (text !== undefined && text !== null) node.textContent = String(text);
     return node;
+  }
+
+  // A link that acts like a button: it takes the blog's link style, not its
+  // button style. href points at what it opens when there is such a place.
+  function action(className, text, handler, href) {
+    var link = el("a", className, text);
+    link.href = href || "#";
+    link.setAttribute("role", "button");
+    link.addEventListener("click", function (event) {
+      event.preventDefault();
+      handler(event);
+    });
+    link.addEventListener("keydown", function (event) {
+      if (event.key === " ") {           // Enter already clicks a link; Space should too
+        event.preventDefault();
+        handler(event);
+      }
+    });
+    return link;
   }
 
   function formatDate(date, withTime) {
@@ -276,15 +297,14 @@
     if (data.open && data.form) {
       this.token = data.form.token;
       this.formEl = this.form(data.form);
-      // Collapsed behind a button unless the page asks for it open (data-form="open").
+      // Collapsed behind a link unless the page asks for it open (data-form="open").
       if (this.root.dataset.form !== "open") {
         var self = this;
         this.formEl.hidden = true;
-        var compose = el("button", "afterword-compose-button", this.t("compose"));
-        compose.type = "button";
+        var compose = action("afterword-compose-button", this.t("compose"),
+                             function () { self.openForm(); }, "#" + this.formEl.id);
         compose.setAttribute("aria-expanded", "false");
         compose.setAttribute("aria-controls", this.formEl.id);
-        compose.addEventListener("click", function () { self.openForm(); });
         this.composeRow = el("p", "afterword-compose");
         this.composeRow.appendChild(compose);
         this.root.appendChild(this.composeRow);
@@ -328,9 +348,7 @@
     line.appendChild(this.reference(this.target));
     line.appendChild(document.createTextNode(" "));
     var self = this;
-    var cancel = el("button", "afterword-cancel-reply", this.t("cancelReply"));
-    cancel.type = "button";
-    cancel.addEventListener("click", function () {
+    var cancel = action("afterword-cancel-reply", this.t("cancelReply"), function () {
       self.cancelReply();
       if (self.messageInput) self.messageInput.focus();
     });
@@ -406,9 +424,8 @@
     }
     item.appendChild(this.body(c));
     if (this.replies && id) {
-      var reply = el("button", "afterword-reply-button", this.t("reply"));
-      reply.type = "button";
-      reply.addEventListener("click", function () { self.startReply(c, id); });
+      var reply = action("afterword-reply-button", this.t("reply"),
+                         function () { self.startReply(c, id); }, "#afterword-form-" + this.n);
       var actions = el("p", "afterword-comment-actions");
       actions.appendChild(reply);
       item.appendChild(actions);
@@ -553,11 +570,9 @@
       field.autocomplete = "off";
       field.value = formatKey(current.key);
       backup.appendChild(self.field("backup", t("backup"), field));
-      var copy = el("button", "afterword-copy", t("copy"));
-      copy.type = "button";
       var copied = el("span", "afterword-copied");
       copied.setAttribute("role", "status");
-      copy.addEventListener("click", function () {
+      var copy = action("afterword-copy", t("copy"), function () {
         function done() { copied.textContent = " " + t("copied"); }
         field.focus();
         field.select();
@@ -575,9 +590,7 @@
       backup.open = !!showBackup;
       box.appendChild(backup);
 
-      var forget = el("button", "afterword-forget", t("forget"));
-      forget.type = "button";
-      forget.addEventListener("click", function () {
+      var forget = action("afterword-forget", t("forget"), function () {
         if (!window.confirm(t("forgetConfirm", { name: current.name }))) return;
         savePseudonym(STORE, null);
         current = null;
@@ -613,8 +626,8 @@
       input.spellcheck = false;
       input.autocomplete = "off";
       restore.appendChild(self.field("restore", t("restoreKey"), input));
-      var button = el("button", "afterword-restore-button", t("restoreButton"));
-      button.type = "button";
+      var busy = false;
+      var button = action("afterword-restore-button", t("restoreButton"), function () { send(); });
       restore.appendChild(wrap("p", "afterword-restore-actions", [button]));
       var result = null;
       function report(text) {
@@ -622,13 +635,15 @@
         result = restore.appendChild(notice("error", text));
       }
       function send() {
+        if (busy) return;
         var key = parseKey(input.value);
         input.removeAttribute("aria-invalid");
         if (!key) {
           input.setAttribute("aria-invalid", "true");
           return report(t("errorPseudonymKeyInvalid"));
         }
-        button.disabled = true;
+        busy = true;
+        button.setAttribute("aria-disabled", "true");
         fetch(self.api("api/v1/pseudonym"), {
           method: "POST", credentials: "omit", mode: "cors",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -650,10 +665,10 @@
         }).catch(function () {
           report(t("errorNetwork"));
         }).then(function () {
-          button.disabled = false;
+          busy = false;
+          button.removeAttribute("aria-disabled");
         });
       }
-      button.addEventListener("click", send);
       input.addEventListener("keydown", function (event) {
         if (event.key === "Enter") {
           event.preventDefault();   // do not send the comment form

@@ -407,8 +407,8 @@ test("restoring from a pasted backup file", async () => {
   const restore = form.querySelector("details.afterword-restore");
   assert.equal(restore.querySelector("summary").textContent, "Restore a pseudonym from a backup key");
   const input = restore.querySelector("input[name=restore]");
-  const button = restore.querySelector("button.afterword-restore-button");
-  assert.equal(button.type, "button");
+  const button = restore.querySelector("a.afterword-restore-button");
+  assert.equal(button.getAttribute("role"), "button");
 
   input.value = "not a key";
   button.click();
@@ -448,11 +448,11 @@ test("stop using a pseudonym on this device, after confirming", async () => {
   const form = document.querySelector("form");
   assert.ok(form.querySelector(".afterword-field--name").hidden);
   assert.ok(!form.querySelector("details.afterword-backup").open);
-  form.querySelector("button.afterword-forget").click();
+  form.querySelector("a.afterword-forget").click();
   assert.match(questions[0], /Without your backup key you cannot post as Mara again/);
   assert.deepEqual(stored(window), { name: "Mara", key: KEY });
   answer = true;
-  form.querySelector("button.afterword-forget").click();
+  form.querySelector("a.afterword-forget").click();
   assert.equal(stored(window), null);
   assert.ok(!form.querySelector(".afterword-field--name").hidden);
   assert.equal(form.querySelector("[name=author]").value, "");
@@ -508,11 +508,12 @@ test("the form is collapsed behind a button until the reader wants to write", as
   await tick(10);
   const root = document.querySelector("[data-afterword]");
   const form = root.querySelector("form.afterword-form");
-  const button = root.querySelector(".afterword-compose > button.afterword-compose-button");
+  const button = root.querySelector(".afterword-compose > a.afterword-compose-button");
   assert.ok(form.hidden);
   assert.ok(!root.querySelector(".afterword-list").hidden);         // comments are open
   assert.equal(button.textContent, "Write a comment");
-  assert.equal(button.type, "button");
+  assert.equal(button.getAttribute("role"), "button");
+  assert.equal(button.getAttribute("href"), "#" + form.id);
   assert.equal(button.getAttribute("aria-controls"), form.id);
   assert.equal(button.getAttribute("aria-expanded"), "false");
   // The compose button comes after the comments, where the form will open.
@@ -562,8 +563,8 @@ test("replies are shown one level deep with an @name and date reference", async 
   assert.equal(replies[2].querySelector(".afterword-reply-to a"), null);
   assert.equal(replies[2].querySelector(".afterword-reply-ref").textContent, "@Grace");
   // Every comment can be answered, top-level ones and replies alike.
-  assert.equal(root.querySelectorAll("button.afterword-reply-button").length, 4);
-  assert.equal(top.querySelector(":scope > .afterword-comment-actions > button").textContent, "Reply");
+  assert.equal(root.querySelectorAll("a.afterword-reply-button[role=button]").length, 4);
+  assert.equal(top.querySelector(":scope > .afterword-comment-actions > a").textContent, "Reply");
 });
 
 test("replying: form opens with the reference, sends reply_to, and files the reply under its comment", async () => {
@@ -607,7 +608,7 @@ test("replying: form opens with the reference, sends reply_to, and files the rep
   // A plain comment afterwards carries no reply_to; so does one after "Cancel reply".
   reply = { status: 202, json: { status: "pending", token: "t3" } };
   root.querySelector("#comment-b2 .afterword-reply-button").click();
-  replying.querySelector("button.afterword-cancel-reply").click();
+  replying.querySelector("a.afterword-cancel-reply").click();
   assert.ok(replying.hidden);
   await submit(window, form, { author: "Ada", body: "Just a comment" });
   const posts = calls.filter((c) => c.init.method === "POST");
@@ -632,4 +633,32 @@ test("no reply buttons when replies are off, but existing replies are still show
   await tick(10);
   assert.equal(document.querySelectorAll(".afterword-reply-button").length, 0);
   assert.ok(document.querySelector("#comment-a1 .afterword-replies #comment-r1"));
+});
+
+test("only Post comment is a button; every other control is a link that Space and Enter work on", async () => {
+  const { window, document } = setup({
+    html: '<div data-afterword data-thread="t1"></div>',
+    storage: { "afterword:pseudonym": { name: "Mara", key: KEY } },
+    routes: { "GET /api/v1/thread": withReplies([
+      { id: "a1", author: "Ada", created: "2026-09-20T08:00:00Z", body: [] }], { pseudonyms: true }) },
+  });
+  await tick(10);
+  const root = document.querySelector("[data-afterword]");
+  const buttons = [...root.querySelectorAll("button")];
+  assert.deepEqual(buttons.map((b) => b.className), ["afterword-submit"]);
+  const links = [...root.querySelectorAll("a[role=button]")].map((a) => a.className);
+  for (const name of ["afterword-compose-button", "afterword-reply-button", "afterword-copy", "afterword-forget"]) {
+    assert.ok(links.includes(name), name);
+  }
+  // Space activates a link-button (Enter does natively), without scrolling the page.
+  const compose = root.querySelector(".afterword-compose-button");
+  const space = new window.KeyboardEvent("keydown", { key: " ", cancelable: true });
+  compose.dispatchEvent(space);
+  assert.ok(space.defaultPrevented);
+  assert.ok(!root.querySelector("form").hidden);
+  // Clicking a link-button never navigates away.
+  const click = new window.MouseEvent("click", { cancelable: true, bubbles: true });
+  root.querySelector(".afterword-reply-button").dispatchEvent(click);
+  assert.ok(click.defaultPrevented);
+  assert.match(root.querySelector(".afterword-replying").textContent, /Replying to @Ada/);
 });

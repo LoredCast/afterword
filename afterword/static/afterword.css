@@ -84,25 +84,27 @@
   margin: 0.4em 0 0;
 }
 
-/* Reply and cancel look like quiet links, not like the blog's main buttons. */
+/* Reply, cancel and the pseudonym actions are links (role="button"); keep them quiet. */
 .afterword-reply-button,
-.afterword-cancel-reply {
-  padding: 0;
-  border: 0;
-  background: none;
+.afterword-cancel-reply,
+.afterword-forget {
   color: inherit;
-  font: inherit;
   font-size: 0.85em;
-  text-decoration: underline;
   opacity: 0.7;
-  cursor: pointer;
 }
 
 .afterword-reply-button:hover,
 .afterword-reply-button:focus-visible,
 .afterword-cancel-reply:hover,
-.afterword-cancel-reply:focus-visible {
+.afterword-cancel-reply:focus-visible,
+.afterword-forget:hover,
+.afterword-forget:focus-visible {
   opacity: 1;
+}
+
+[aria-disabled="true"] {
+  pointer-events: none;
+  opacity: 0.5;
 }
 
 .afterword-replying {

@@ -308,8 +308,13 @@ def main() -> None:
             expect(replies.nth(1).locator(".afterword-verified")).to_have_text("verified")
             expect(reader.locator(".afterword-replies .afterword-replies")).to_have_count(0)
             expect(reader.locator(".afterword-count")).to_have_text("6")
-            assert reader.eval_on_selector(".afterword-reply-button", "b => getComputedStyle(b).backgroundColor") \
-                in ("rgba(0, 0, 0, 0)", "transparent"), "reply buttons should look like quiet links"
+            # "Post comment" is the only <button>; Reply, Write a comment, Stop using… are links,
+            # so the blog's button style (a blue box here) never applies to them.
+            tags = reader.eval_on_selector_all("#comments button", "bs => bs.map(b => b.className)")
+            assert tags == ["afterword-submit"], tags
+            for selector in (".afterword-reply-button", ".afterword-compose-button", ".afterword-forget"):
+                look = reader.eval_on_selector(selector, "a => [a.tagName, getComputedStyle(a).backgroundColor]")
+                assert look == ["A", "rgba(0, 0, 0, 0)"], (selector, look)
             reader.screenshot(path=f"{SHOTS}/13-blog-replies.png", full_page=True)
             grace_context.close()
 

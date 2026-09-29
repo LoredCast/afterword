@@ -34,7 +34,7 @@ For pages that add content later, call `Afterword.init()` (or
 | `data-thread-from="canonical"` | The path of the page's `<link rel="canonical">`. Useful when one post is reachable at several addresses. |
 | `data-server="https://…"` | Override the server address (normally taken from the script's URL). |
 | `data-heading-level="2"` | Level of the "Comments" heading (2–6). The form heading is one level lower. |
-| `data-form="open"` | Show the comment form straight away. By default it is collapsed behind a “Write a comment” button, so only the comments are open. |
+| `data-form="open"` | Show the comment form straight away. By default it is collapsed behind a “Write a comment” link, so only the comments are open. |
 | `data-remember="true"` | Remember the reader's name and email in their browser (localStorage) for next time. Off by default. |
 | `data-text-…="…"` | Replace any piece of text; see below. |
 
@@ -61,7 +61,7 @@ empty string to leave it out.
 |---|---|
 | `data-text-heading` | Comments |
 | `data-text-form-heading` | Leave a comment |
-| `data-text-compose` | Write a comment (the button that opens the form) |
+| `data-text-compose` | Write a comment (the link that opens the form) |
 | `data-text-reply` | Reply |
 | `data-text-replying-to` | Replying to |
 | `data-text-cancel-reply` | Cancel reply |
@@ -151,13 +151,13 @@ This is what the widget builds inside your container (one comment with one reply
         <p>Text with <em>emphasis</em>, <code>code</code><br>and
            <a href="https://…" rel="nofollow ugc noopener noreferrer">https://…</a></p>
       </div>
-      <p class="afterword-comment-actions"><button class="afterword-reply-button" type="button">Reply</button></p>
+      <p class="afterword-comment-actions"><a class="afterword-reply-button" role="button" href="#afterword-form-1">Reply</a></p>
       <ol class="afterword-replies">
         <li class="afterword-comment afterword-comment--reply" id="comment-p7q…">
           <p class="afterword-meta">…</p>
           <p class="afterword-reply-to"><a class="afterword-reply-ref" href="#comment-k3j2x9…">@Mara · Sep 24, 2026, 10:00 AM</a></p>
           <div class="afterword-body">…</div>
-          <p class="afterword-comment-actions"><button class="afterword-reply-button" type="button">Reply</button></p>
+          <p class="afterword-comment-actions"><a class="afterword-reply-button" role="button" href="#afterword-form-1">Reply</a></p>
         </li>
       </ol>
     </li>
@@ -167,12 +167,12 @@ This is what the widget builds inside your container (one comment with one reply
        <span class="afterword-verified" title="…">verified</span>
        <span class="afterword-unverified" title="…">unverified</span>
        and a verified comment's <li> gets afterword-comment--verified. -->
-  <p class="afterword-compose"><button class="afterword-compose-button" type="button"
-     aria-expanded="false">Write a comment</button></p>   <!-- not with data-form="open" -->
+  <p class="afterword-compose"><a class="afterword-compose-button" role="button"
+     href="#afterword-form-1" aria-expanded="false">Write a comment</a></p>   <!-- not with data-form="open" -->
   <form class="afterword-form" id="afterword-form-1" hidden>   <!-- shown by the button or a Reply -->
     <h3 class="afterword-form-heading">Leave a comment</h3>
     <p class="afterword-replying" hidden>Replying to <a class="afterword-reply-ref" href="#comment-…">@Mara · …</a>
-      <button class="afterword-cancel-reply" type="button">Cancel reply</button></p>
+      <a class="afterword-cancel-reply" role="button" href="#">Cancel reply</a></p>
     <p class="afterword-field afterword-field--name">
       <label class="afterword-label">Name</label> <input class="afterword-input">
     </p>
@@ -184,7 +184,7 @@ This is what the widget builds inside your container (one comment with one reply
       <p class="afterword-pseudonym-help" hidden>Your browser will hold a secret key…</p>
       <details class="afterword-restore"><summary>Restore a pseudonym…</summary>
         <p class="afterword-field afterword-field--restore">…</p>
-        <p class="afterword-restore-actions"><button class="afterword-restore-button" type="button">Restore</button></p>
+        <p class="afterword-restore-actions"><a class="afterword-restore-button" role="button" href="#">Restore</a></p>
       </details>
     </div>
     <p class="afterword-field afterword-field--email">…</p>
@@ -233,7 +233,7 @@ This is what the widget builds inside your container (one comment with one reply
 | `afterword-hint` | Formatting hint under the comment box |
 | `afterword-hp` | Hidden spam trap. Do not make it visible. |
 | `afterword-actions` | Row containing the button |
-| `afterword-submit` | The button |
+| `afterword-submit` | The “Post comment” button, the only `<button>` |
 | `afterword-notice` | Result message (`hidden` until there is one) |
 | `afterword-notice--success`, `--pending`, `--error` | Kind of message |
 
@@ -247,10 +247,10 @@ instead:
 <details class="afterword-backup"><summary>Backup key</summary>
   <p class="afterword-backup-help">Anyone with this key…</p>
   <p class="afterword-field afterword-field--backup">… <input class="afterword-input afterword-backup-key" readonly></p>
-  <p class="afterword-backup-actions"><button class="afterword-copy" type="button">Copy</button>
+  <p class="afterword-backup-actions"><a class="afterword-copy" role="button" href="#">Copy</a>
      <a class="afterword-download" download>Download</a> <span class="afterword-copied"></span></p>
 </details>
-<p class="afterword-pseudonym-actions"><button class="afterword-forget" type="button">Stop using it on this device</button></p>
+<p class="afterword-pseudonym-actions"><a class="afterword-forget" role="button" href="#">Stop using it on this device</a></p>
 ```
 
 | Pseudonym class | Element |
@@ -267,6 +267,11 @@ instead:
 | `afterword-backup`, `afterword-backup-help`, `afterword-backup-key` | The backup key |
 | `afterword-copy`, `afterword-download`, `afterword-copied` | Copy, download, and “Copied.” |
 | `afterword-forget` | “Stop using it on this device” |
+
+**Post comment** is the widget’s only `<button>`. Every other control (Write a
+comment, Reply, Cancel reply, Restore, Copy, Stop using it on this device) is an
+`<a role="button">`, so your theme’s link style applies to it and its button
+style does not. They work with Enter and Space like buttons.
 
 Invalid fields get `aria-invalid="true"`; the form gets `aria-busy="true"`
 while sending.
